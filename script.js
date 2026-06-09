@@ -148,7 +148,6 @@ modal.addEventListener("click", (event) => {
 
 function setupExtraUi() {
   createSearchPanel();
-  createResetRecordsButton();
 }
 
 function createSearchPanel() {
@@ -193,21 +192,6 @@ function createSearchPanel() {
     render();
     input.focus();
   });
-}
-
-function createResetRecordsButton() {
-  if (document.getElementById("resetRecordsBtn")) return;
-
-  const sideActions = document.querySelector(".side-actions");
-  if (!sideActions || !resetAllBtn) return;
-
-  const button = document.createElement("button");
-  button.id = "resetRecordsBtn";
-  button.className = "side-btn warning admin-only hidden";
-  button.textContent = "최근 전적 초기화";
-
-  resetAllBtn.insertAdjacentElement("beforebegin", button);
-  button.addEventListener("click", resetAllRecords);
 }
 
 function convertFirebaseData(data) {
@@ -443,6 +427,7 @@ function createPlayerRow(player) {
       <button class="mini-btn" data-action="win">승</button>
       <button class="mini-btn" data-action="loss">패</button>
       <button class="mini-btn" data-action="undo">취소</button>
+      <button class="mini-btn warning" data-action="reset">초기화</button>
       <button class="mini-btn" data-action="edit">수정</button>
       <button class="mini-btn" data-action="move">이동</button>
       <button class="mini-btn danger" data-action="delete">삭제</button>
@@ -459,6 +444,10 @@ function createPlayerRow(player) {
 
   row.querySelector('[data-action="undo"]')?.addEventListener("click", () => {
     undoRecord(player.id);
+  });
+
+  row.querySelector('[data-action="reset"]')?.addEventListener("click", () => {
+    resetPlayerRecords(player.id);
   });
 
   row.querySelector('[data-action="edit"]')?.addEventListener("click", () => {
@@ -513,33 +502,31 @@ async function undoRecord(playerId) {
   }
 }
 
-async function resetAllRecords() {
+async function resetPlayerRecords(playerId) {
   if (!requireAdmin()) return;
 
-  if (state.players.length === 0) {
-    alert("초기화할 인원이 없습니다.");
+  const player = state.players.find((p) => p.id === playerId);
+  if (!player) return;
+
+  if (player.records.length === 0) {
+    alert(`${player.name} 님은 초기화할 전적이 없습니다.`);
     return;
   }
 
   if (
     !confirm(
-      `모든 인원의 최근 전적을 초기화할까요?\n\n멤버 ${state.players.length}명은 유지되고, 승/패 기록만 삭제됩니다.`
+      `${player.shortName ? player.shortName + " / " : ""}${player.name} 님의 최근 전적을 초기화할까요?\n\n멤버는 유지되고 이 사람의 승/패 기록만 삭제됩니다.`
     )
   ) {
     return;
   }
 
-  const updates = {};
-
-  state.players.forEach((player) => {
-    updates[`${ROOT_PATH}/players/${player.id}/records`] = [];
-  });
-
-  updates[`${ROOT_PATH}/meta`] = createMeta();
-
   try {
-    await update(ref(db), updates);
-    alert("최근 전적 초기화 완료!");
+    await update(ref(db, `${ROOT_PATH}/players/${playerId}`), {
+      records: []
+    });
+
+    await updateMeta();
   } catch (error) {
     alertWriteError(error);
   }
