@@ -515,7 +515,7 @@ textarea {
 /* 플레이어 카드 */
 .player-row {
   display: grid;
-  grid-template-columns: 140px minmax(120px, 1fr) 74px 74px 84px 210px;
+  grid-template-columns: 140px minmax(120px, 1fr) 74px 74px 84px 230px;
   gap: 10px;
   align-items: center;
   margin-bottom: 10px;
@@ -901,7 +901,7 @@ textarea {
 /* 반응형 */
 @media (max-width: 1400px) {
   .player-row {
-    grid-template-columns: 130px minmax(110px, 1fr) 68px 68px 76px 190px;
+    grid-template-columns: 130px minmax(110px, 1fr) 68px 68px 76px 220px;
   }
 }
 
@@ -978,4 +978,16 @@ textarea {
   .sub-tier-title {
     font-size: 20px;
   }
+}
+
+
+/* 인원별 최근 전적 초기화 버튼 */
+.mini-btn.warning {
+  color: #ffe9a6;
+  border-color: rgba(255, 225, 77, 0.24);
+}
+
+.mini-btn.warning:hover {
+  background: rgba(255, 225, 77, 0.1);
+  color: #fff4bd;
 }
