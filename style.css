@@ -515,8 +515,8 @@ textarea {
 /* 플레이어 카드 */
 .player-row {
   display: grid;
-  grid-template-columns: 140px minmax(120px, 1fr) 74px 74px 84px 230px;
-  gap: 10px;
+  grid-template-columns: 130px minmax(0, 1fr) 72px 72px 82px 240px;
+  gap: 8px;
   align-items: center;
   margin-bottom: 10px;
   padding: 12px 14px;
@@ -534,6 +534,12 @@ textarea {
   transform: translateY(-1px);
   border-color: rgba(255, 225, 77, 0.18);
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
+}
+
+.player-name,
+.record-dots,
+.player-actions {
+  min-width: 0;
 }
 
 .player-name {
@@ -627,7 +633,7 @@ textarea {
 }
 
 .mini-btn {
-  padding: 7px 9px;
+  padding: 6px 8px;
   border-radius: 10px;
   border: 1px solid var(--line-strong);
   background: rgba(255,255,255,0.03);
@@ -642,6 +648,16 @@ textarea {
   background: rgba(84, 115, 255, 0.14);
   border-color: rgba(84, 115, 255, 0.24);
   color: #e2e8ff;
+}
+
+.mini-btn.warning {
+  color: #ffe9a6;
+  border-color: rgba(255, 225, 77, 0.24);
+}
+
+.mini-btn.warning:hover {
+  background: rgba(255, 225, 77, 0.1);
+  color: #fff4bd;
 }
 
 .mini-btn.danger {
@@ -901,7 +917,12 @@ textarea {
 /* 반응형 */
 @media (max-width: 1400px) {
   .player-row {
-    grid-template-columns: 130px minmax(110px, 1fr) 68px 68px 76px 220px;
+    grid-template-columns: 120px minmax(0, 1fr) 64px 64px 72px 220px;
+  }
+
+  .mini-btn {
+    padding: 6px 7px;
+    font-size: 11px;
   }
 }
 
@@ -978,16 +999,4 @@ textarea {
   .sub-tier-title {
     font-size: 20px;
   }
-}
-
-
-/* 인원별 최근 전적 초기화 버튼 */
-.mini-btn.warning {
-  color: #ffe9a6;
-  border-color: rgba(255, 225, 77, 0.24);
-}
-
-.mini-btn.warning:hover {
-  background: rgba(255, 225, 77, 0.1);
-  color: #fff4bd;
 }
