@@ -159,6 +159,7 @@ modal.addEventListener("click", (event) => {
 
 function convertFirebaseData(data) {
   const rawPlayers = data.players || {};
+
   const players = Object.entries(rawPlayers).map(([id, player]) => {
     const tier = isValidTier(player.tier) ? player.tier : "0티어";
     const subTier = isValidSubTier(tier, player.subTier)
@@ -168,6 +169,7 @@ function convertFirebaseData(data) {
     return {
       id,
       name: player.name || "이름없음",
+      shortName: player.shortName || "",
       tier,
       subTier,
       records: Array.isArray(player.records) ? player.records.slice(-20) : [],
@@ -207,8 +209,8 @@ function renderStats() {
     return sum + player.records.length;
   }, 0);
 
-  totalPlayersEl.textContent = totalPlayers;
-  totalGamesEl.textContent = totalGames;
+  totalPlayersEl.textContent = `${totalPlayers}명`;
+  totalGamesEl.textContent = `${totalGames}게임`;
   updatedAtEl.textContent = state.updatedAt || "-";
 }
 
@@ -308,18 +310,31 @@ function createPlayerRow(player) {
     })
     .join("");
 
+  const shortNameHtml = player.shortName
+    ? `<span class="player-short">${escapeHtml(player.shortName)}</span>`
+    : `<span class="player-short empty-short">--</span>`;
+
   row.innerHTML = `
-    <div class="player-name">${escapeHtml(player.name)}</div>
-    <div class="record-dots">
-      ${recordHtml || `<span style="color:#666;">기록 없음</span>`}
+    <div class="player-name">
+      <div class="player-identity">
+        ${shortNameHtml}
+        <span class="player-full">${escapeHtml(player.name)}</span>
+      </div>
     </div>
+
+    <div class="record-dots">
+      ${recordHtml || `<span style="color:#667085;">기록 없음</span>`}
+    </div>
+
     <div class="stat">${wins}승</div>
     <div class="stat">${losses}패</div>
     <div class="stat">${winRate}</div>
+
     <div class="player-actions admin-only ${isAdmin ? "" : "hidden"}">
       <button class="mini-btn" data-action="win">승</button>
       <button class="mini-btn" data-action="loss">패</button>
       <button class="mini-btn" data-action="undo">취소</button>
+      <button class="mini-btn" data-action="edit">수정</button>
       <button class="mini-btn" data-action="move">이동</button>
       <button class="mini-btn danger" data-action="delete">삭제</button>
     </div>
@@ -335,6 +350,10 @@ function createPlayerRow(player) {
 
   row.querySelector('[data-action="undo"]')?.addEventListener("click", () => {
     undoRecord(player.id);
+  });
+
+  row.querySelector('[data-action="edit"]')?.addEventListener("click", () => {
+    openEditPlayerModal(player.id);
   });
 
   row.querySelector('[data-action="move"]')?.addEventListener("click", () => {
@@ -474,9 +493,11 @@ function openAddRecordModal() {
 
   const playerOptions = state.players
     .map((player) => {
+      const label = `${player.shortName || "--"} / ${player.name} / ${player.tier} / ${player.subTier}`;
+
       return `
         <option value="${player.id}">
-          ${escapeHtml(player.name)} / ${player.tier} / ${player.subTier}
+          ${escapeHtml(label)}
         </option>
       `;
     })
@@ -532,8 +553,13 @@ function openAddPlayerModal() {
     `
       <form class="form" id="addPlayerForm">
         <label>
-          닉네임
-          <input type="text" id="playerName" placeholder="닉네임 입력" autocomplete="off" />
+          풀네임
+          <input type="text" id="playerName" placeholder="풀네임 입력" autocomplete="off" />
+        </label>
+
+        <label>
+          두글자 닉네임
+          <input type="text" id="playerShortName" placeholder="예: 해원" maxlength="2" autocomplete="off" />
         </label>
 
         <label>
@@ -569,18 +595,35 @@ function openAddPlayerModal() {
     event.preventDefault();
 
     const name = document.getElementById("playerName").value.trim();
+    const shortName = document.getElementById("playerShortName").value.trim();
     const tier = tierSelect.value;
     const subTier = subTierSelect.value;
 
     if (!name) {
-      alert("닉네임을 입력해 주세요.");
+      alert("풀네임을 입력해 주세요.");
       return;
     }
 
-    const duplicated = state.players.some((player) => player.name === name);
+    if (!shortName) {
+      alert("두글자 닉네임을 입력해 주세요.");
+      return;
+    }
 
-    if (duplicated) {
-      alert("이미 등록된 닉네임입니다.");
+    if (shortName.length > 2) {
+      alert("두글자 닉네임은 최대 2글자까지 입력할 수 있습니다.");
+      return;
+    }
+
+    const duplicatedName = state.players.some((player) => player.name === name);
+    const duplicatedShortName = state.players.some((player) => player.shortName === shortName);
+
+    if (duplicatedName) {
+      alert("이미 등록된 풀네임입니다.");
+      return;
+    }
+
+    if (duplicatedShortName) {
+      alert("이미 등록된 두글자 닉네임입니다.");
       return;
     }
 
@@ -588,6 +631,7 @@ function openAddPlayerModal() {
 
     const newPlayer = {
       name,
+      shortName,
       tier,
       subTier,
       records: [],
@@ -596,6 +640,87 @@ function openAddPlayerModal() {
 
     try {
       await set(ref(db, `${ROOT_PATH}/players/${id}`), newPlayer);
+      await updateMeta();
+      closeModal();
+    } catch (error) {
+      alertWriteError(error);
+    }
+  });
+
+  bindCloseButtons();
+}
+
+function openEditPlayerModal(playerId) {
+  const player = state.players.find((p) => p.id === playerId);
+  if (!player) return;
+
+  openModal(
+    "닉네임 수정",
+    `
+      <form class="form" id="editPlayerForm">
+        <label>
+          풀네임
+          <input type="text" id="editPlayerName" value="${escapeAttr(player.name)}" autocomplete="off" />
+        </label>
+
+        <label>
+          두글자 닉네임
+          <input type="text" id="editPlayerShortName" value="${escapeAttr(player.shortName || "")}" maxlength="2" autocomplete="off" />
+        </label>
+
+        <div class="form-actions">
+          <button type="submit" class="submit-btn">저장</button>
+          <button type="button" class="cancel-btn" data-close>취소</button>
+        </div>
+      </form>
+    `
+  );
+
+  document.getElementById("editPlayerForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    const name = document.getElementById("editPlayerName").value.trim();
+    const shortName = document.getElementById("editPlayerShortName").value.trim();
+
+    if (!name) {
+      alert("풀네임을 입력해 주세요.");
+      return;
+    }
+
+    if (!shortName) {
+      alert("두글자 닉네임을 입력해 주세요.");
+      return;
+    }
+
+    if (shortName.length > 2) {
+      alert("두글자 닉네임은 최대 2글자까지 입력할 수 있습니다.");
+      return;
+    }
+
+    const duplicatedName = state.players.some((p) => {
+      return p.id !== playerId && p.name === name;
+    });
+
+    const duplicatedShortName = state.players.some((p) => {
+      return p.id !== playerId && p.shortName === shortName;
+    });
+
+    if (duplicatedName) {
+      alert("이미 등록된 풀네임입니다.");
+      return;
+    }
+
+    if (duplicatedShortName) {
+      alert("이미 등록된 두글자 닉네임입니다.");
+      return;
+    }
+
+    try {
+      await update(ref(db, `${ROOT_PATH}/players/${playerId}`), {
+        name,
+        shortName
+      });
+
       await updateMeta();
       closeModal();
     } catch (error) {
@@ -615,13 +740,15 @@ function openMoveTierModal(playerId) {
     return `<option value="${group.name}" ${selected}>${group.name}</option>`;
   }).join("");
 
+  const playerLabel = `${player.shortName || "--"} / ${player.name}`;
+
   openModal(
     "티어 이동",
     `
       <form class="form" id="moveTierForm">
         <label>
           닉네임
-          <input type="text" value="${escapeHtml(player.name)}" disabled />
+          <input type="text" value="${escapeAttr(playerLabel)}" disabled />
         </label>
 
         <label>
@@ -750,6 +877,10 @@ function escapeHtml(text) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+function escapeAttr(text) {
+  return escapeHtml(text);
 }
 
 function createId() {
