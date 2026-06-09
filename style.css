@@ -842,3 +842,77 @@ select {
   font-weight: 800;
   line-height: 1.25;
 }
+
+/* 전적 일괄 추가 모달 */
+.modal-box.wide-modal {
+  max-width: 680px;
+}
+
+.bulk-record-box {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
+.bulk-area-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bulk-area-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: #f6f8fb;
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.bulk-area-title .hint {
+  color: #8690a3;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.form textarea.bulk-textarea {
+  width: 100%;
+  min-height: 150px;
+  resize: vertical;
+  margin-top: 0;
+  padding: 15px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.035);
+  color: #f6f8fb;
+  font-size: 16px;
+  line-height: 1.6;
+  outline: none;
+}
+
+.form textarea.bulk-textarea:focus {
+  border-color: rgba(84, 115, 255, 0.42);
+  box-shadow: 0 0 0 4px rgba(84, 115, 255, 0.12);
+}
+
+.form textarea.bulk-textarea::placeholder {
+  color: #677184;
+}
+
+.bulk-win {
+  border-color: rgba(84, 115, 255, 0.32) !important;
+}
+
+.bulk-loss {
+  border-color: rgba(255, 103, 103, 0.32) !important;
+}
+
+.bulk-help {
+  color: #8690a3;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.bulk-help b {
+  color: #ffe14d;
+}
