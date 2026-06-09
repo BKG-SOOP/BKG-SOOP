@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BKG-SOOP 전적표</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <aside class="sidebar">
+    <h1>BKG-SOOP</h1>
+    <p class="subtitle">티어별 최근 20전 전적표</p>
+
+    <div class="side-card">
+      <div>전체 인원 <strong id="totalPlayers">0</strong>명</div>
+      <div>전체 전적 <strong id="totalGames">0</strong>게임</div>
+      <div class="small">최근 수정</div>
+      <div id="updatedAt" class="updated">-</div>
+    </div>
+
+    <nav class="tier-nav" id="tierNav"></nav>
+
+    <div class="admin-only side-actions hidden">
+      <button id="addPlayerBtn" class="side-btn">닉네임 추가</button>
+      <button id="resetAllBtn" class="side-btn danger">전체 초기화</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="top-actions">
+      <button id="loginBtn" class="blue-btn">관리자 로그인</button>
+      <button id="addRecordBtn" class="blue-btn">전적 추가</button>
+    </div>
+
+    <section class="board">
+      <div id="tiersContainer"></div>
+    </section>
+  </main>
+
+  <div id="modal" class="modal hidden">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h2 id="modalTitle">제목</h2>
+        <button id="modalClose" class="close-btn">×</button>
+      </div>
+      <div id="modalBody"></div>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
