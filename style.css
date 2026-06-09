@@ -781,3 +781,31 @@ select {
   background-color: #22345f;
   color: #ffffff;
 }
+
+.player-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.player-short {
+  display: inline-flex;
+  width: fit-content;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: rgba(255, 225, 77, 0.14);
+  border: 1px solid rgba(255, 225, 77, 0.22);
+  color: #ffe14d;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.player-full {
+  color: #f6f8fb;
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.player-name {
+  font-size: 16px;
+}
