@@ -209,7 +209,7 @@ function convertFirebaseData(data) {
       shortName: player.shortName || "",
       tier,
       subTier,
-      records: Array.isArray(player.records) ? player.records.slice(-20) : [],
+      records: Array.isArray(player.records) ? player.records.slice(-30) : [],
       createdAt: player.createdAt || 0
     };
   });
@@ -395,7 +395,7 @@ function createPlayerRow(player) {
   row.className = "player-row";
 
   const recordHtml = player.records
-    .slice(-20)
+    .slice(-30)
     .map((record) => {
       const className = record === "W" ? "win" : "loss";
       const label = record === "W" ? "승" : "패";
@@ -471,7 +471,7 @@ async function addRecord(playerId, result) {
   const player = state.players.find((p) => p.id === playerId);
   if (!player) return;
 
-  const records = [...player.records, result].slice(-20);
+  const records = [...player.records, result].slice(-30);
 
   try {
     await update(ref(db, `${ROOT_PATH}/players/${playerId}`), { records });
@@ -751,12 +751,12 @@ async function addBulkRecords(winnerNames, loserNames) {
   const updates = {};
 
   winnerPlayers.forEach((player) => {
-    const records = [...player.records, "W"].slice(-20);
+    const records = [...player.records, "W"].slice(-30);
     updates[`${ROOT_PATH}/players/${player.id}/records`] = records;
   });
 
   loserPlayers.forEach((player) => {
-    const records = [...player.records, "L"].slice(-20);
+    const records = [...player.records, "L"].slice(-30);
     updates[`${ROOT_PATH}/players/${player.id}/records`] = records;
   });
 
