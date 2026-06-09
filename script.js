@@ -148,6 +148,7 @@ modal.addEventListener("click", (event) => {
 
 function setupExtraUi() {
   createSearchPanel();
+  createTopWinRatePanel();
 }
 
 function createSearchPanel() {
@@ -194,6 +195,37 @@ function createSearchPanel() {
   });
 }
 
+
+function createTopWinRatePanel() {
+  if (document.getElementById("topWinRatePanel")) return;
+
+  const pageShell = document.querySelector(".page-shell") || document.body;
+
+  const panel = document.createElement("aside");
+  panel.id = "topWinRatePanel";
+  panel.className = "top-rank-panel";
+  panel.innerHTML = `
+    <div class="top-rank-head">
+      <div>
+        <div class="top-rank-eyebrow">MEMBER RANKING</div>
+        <h2>최고승률 TOP10</h2>
+      </div>
+      <span id="topRankCount" class="top-rank-count">0명</span>
+    </div>
+
+    <div class="top-rank-desc">
+      전적이 1게임 이상 있는 등록 멤버 기준
+    </div>
+
+    <div id="topWinRateList" class="top-rank-list">
+      <div class="top-rank-empty">아직 집계할 전적이 없습니다.</div>
+    </div>
+  `;
+
+  pageShell.appendChild(panel);
+}
+
+
 function convertFirebaseData(data) {
   const rawPlayers = data.players || {};
 
@@ -231,6 +263,7 @@ function render() {
   renderTierNav();
   renderTiers();
   renderSearchState();
+  renderTopWinRate();
 }
 
 function renderAdminState() {
@@ -268,6 +301,76 @@ function renderSearchState() {
     clearBtn.classList.add("hidden");
   }
 }
+
+
+function renderTopWinRate() {
+  const listEl = document.getElementById("topWinRateList");
+  const countEl = document.getElementById("topRankCount");
+
+  if (!listEl || !countEl) return;
+
+  const rankedPlayers = state.players
+    .map((player) => {
+      const wins = player.records.filter((record) => record === "W").length;
+      const losses = player.records.filter((record) => record === "L").length;
+      const total = wins + losses;
+      const winRateValue = total === 0 ? 0 : wins / total;
+
+      return {
+        ...player,
+        wins,
+        losses,
+        total,
+        winRateValue
+      };
+    })
+    .filter((player) => player.total > 0)
+    .sort((a, b) => {
+      if (b.winRateValue !== a.winRateValue) return b.winRateValue - a.winRateValue;
+      if (b.wins !== a.wins) return b.wins - a.wins;
+      if (b.total !== a.total) return b.total - a.total;
+      return a.name.localeCompare(b.name, "ko");
+    })
+    .slice(0, 10);
+
+  countEl.textContent = `${rankedPlayers.length}명`;
+
+  if (rankedPlayers.length === 0) {
+    listEl.innerHTML = `<div class="top-rank-empty">아직 집계할 전적이 없습니다.</div>`;
+    return;
+  }
+
+  listEl.innerHTML = rankedPlayers
+    .map((player, index) => {
+      const rank = index + 1;
+      const displayName = player.shortName || player.name;
+      const fullName = player.shortName ? player.name : "";
+      const rate = `${(player.winRateValue * 100).toFixed(1)}%`;
+
+      return `
+        <div class="top-rank-item">
+          <div class="top-rank-left">
+            <div class="top-rank-no">${rank}</div>
+            <div class="top-rank-name-wrap">
+              <div class="top-rank-name">${escapeHtml(displayName)}</div>
+              ${
+                fullName
+                  ? `<div class="top-rank-full">${escapeHtml(fullName)}</div>`
+                  : ""
+              }
+            </div>
+          </div>
+
+          <div class="top-rank-right">
+            <div class="top-rank-rate">${rate}</div>
+            <div class="top-rank-record">${player.wins}승 ${player.losses}패</div>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+}
+
 
 function renderTierNav() {
   tierNav.innerHTML = "";
