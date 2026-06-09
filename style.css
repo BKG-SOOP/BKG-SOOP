@@ -61,6 +61,7 @@ select {
 .updated {
   color: #ddd;
   font-size: 13px;
+  word-break: break-all;
 }
 
 .tier-nav {
@@ -234,7 +235,7 @@ select {
 
 .player-row {
   display: grid;
-  grid-template-columns: 120px 1fr 55px 55px 70px 170px;
+  grid-template-columns: 120px 1fr 55px 55px 70px 220px;
   gap: 10px;
   align-items: center;
   border: 1px solid #222;
@@ -291,6 +292,7 @@ select {
   display: flex;
   gap: 6px;
   justify-content: flex-end;
+  flex-wrap: wrap;
 }
 
 .mini-btn {
@@ -417,6 +419,17 @@ select {
   color: #aaa;
   font-size: 13px;
   line-height: 1.6;
+}
+
+.notice b {
+  color: #fff200;
+}
+
+.error-text {
+  color: #ff8b8b;
+  font-size: 13px;
+  padding: 0 18px 18px;
+  line-height: 1.5;
 }
 
 @media (max-width: 1000px) {
