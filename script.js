@@ -32,32 +32,20 @@ const ADMIN_EMAIL_DOMAIN = "bkg-soop.com";
 const ROOT_PATH = "bkgSoopRecordBoard";
 
 const TIER_GROUPS = [
-  {
-    name: "0티어",
-    subs: ["GOD", "상", "중", "하"]
-  },
-  {
-    name: "1티어",
-    subs: ["최상", "상", "중", "하"]
-  },
-  {
-    name: "2티어",
-    subs: ["최상", "상", "중", "하"]
-  },
-  {
-    name: "3티어",
-    subs: ["최상", "상", "중", "하"]
-  }
+  { name: "0티어", subs: ["GOD", "상", "중", "하"] },
+  { name: "1티어", subs: ["최상", "상", "중", "하"] },
+  { name: "2티어", subs: ["최상", "상", "중", "하"] },
+  { name: "3티어", subs: ["최상", "상", "중", "하"] }
 ];
 
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 const auth = getAuth(app);
-
 const rootRef = ref(db, ROOT_PATH);
 
 let currentUser = null;
 let isAdmin = false;
+let searchQuery = "";
 
 let state = {
   players: [],
@@ -81,12 +69,12 @@ const modalTitle = document.getElementById("modalTitle");
 const modalBody = document.getElementById("modalBody");
 const modalClose = document.getElementById("modalClose");
 
+setupExtraUi();
 render();
 
 onAuthStateChanged(auth, (user) => {
   currentUser = user;
   isAdmin = Boolean(user && user.uid === ADMIN_UID);
-
   render();
 
   if (user && !isAdmin) {
@@ -139,7 +127,8 @@ addPlayerBtn.addEventListener("click", () => {
 
 resetAllBtn.addEventListener("click", async () => {
   if (!requireAdmin()) return;
-  if (!confirm("전체 데이터를 초기화할까요?")) return;
+
+  if (!confirm("전체 데이터를 초기화할까요?\n\n멤버와 전적이 모두 삭제됩니다.")) return;
 
   try {
     await set(rootRef, {
@@ -156,6 +145,70 @@ modalClose.addEventListener("click", closeModal);
 modal.addEventListener("click", (event) => {
   if (event.target === modal) closeModal();
 });
+
+function setupExtraUi() {
+  createSearchPanel();
+  createResetRecordsButton();
+}
+
+function createSearchPanel() {
+  if (document.getElementById("playerSearchInput")) return;
+
+  const main = document.querySelector(".main");
+  const board = document.querySelector(".board");
+
+  if (!main || !board) return;
+
+  const searchPanel = document.createElement("div");
+  searchPanel.className = "search-panel";
+  searchPanel.innerHTML = `
+    <div class="search-row">
+      <div class="search-input-wrap">
+        <input
+          id="playerSearchInput"
+          class="search-input"
+          type="text"
+          placeholder="두글자 닉네임 또는 풀네임 검색"
+          autocomplete="off"
+        />
+        <button id="playerSearchClear" class="search-clear-btn hidden" type="button">×</button>
+      </div>
+      <div id="searchResultBadge" class="search-result-badge">전체</div>
+    </div>
+  `;
+
+  main.insertBefore(searchPanel, board);
+
+  const input = document.getElementById("playerSearchInput");
+  const clearBtn = document.getElementById("playerSearchClear");
+
+  input.addEventListener("input", () => {
+    searchQuery = input.value.trim();
+    render();
+  });
+
+  clearBtn.addEventListener("click", () => {
+    searchQuery = "";
+    input.value = "";
+    render();
+    input.focus();
+  });
+}
+
+function createResetRecordsButton() {
+  if (document.getElementById("resetRecordsBtn")) return;
+
+  const sideActions = document.querySelector(".side-actions");
+  if (!sideActions || !resetAllBtn) return;
+
+  const button = document.createElement("button");
+  button.id = "resetRecordsBtn";
+  button.className = "side-btn warning admin-only hidden";
+  button.textContent = "최근 전적 초기화";
+
+  resetAllBtn.insertAdjacentElement("beforebegin", button);
+  button.addEventListener("click", resetAllRecords);
+}
 
 function convertFirebaseData(data) {
   const rawPlayers = data.players || {};
@@ -193,6 +246,7 @@ function render() {
   renderStats();
   renderTierNav();
   renderTiers();
+  renderSearchState();
 }
 
 function renderAdminState() {
@@ -212,6 +266,23 @@ function renderStats() {
   totalPlayersEl.textContent = `${totalPlayers}명`;
   totalGamesEl.textContent = `${totalGames}게임`;
   updatedAtEl.textContent = state.updatedAt || "-";
+}
+
+function renderSearchState() {
+  const badge = document.getElementById("searchResultBadge");
+  const clearBtn = document.getElementById("playerSearchClear");
+
+  if (!badge || !clearBtn) return;
+
+  const filteredCount = getVisiblePlayers().length;
+
+  if (searchQuery) {
+    badge.textContent = `${filteredCount}명 검색`;
+    clearBtn.classList.remove("hidden");
+  } else {
+    badge.textContent = "전체";
+    clearBtn.classList.add("hidden");
+  }
 }
 
 function renderTierNav() {
@@ -238,11 +309,35 @@ function renderTierNav() {
   });
 }
 
+function getVisiblePlayers() {
+  if (!searchQuery) return state.players;
+
+  const query = normalizeName(searchQuery);
+
+  return state.players.filter((player) => {
+    const fullName = normalizeName(player.name);
+    const shortName = normalizeName(player.shortName || "");
+    const tier = normalizeName(player.tier);
+    const subTier = normalizeName(player.subTier);
+
+    return (
+      fullName.includes(query) ||
+      shortName.includes(query) ||
+      tier.includes(query) ||
+      subTier.includes(query)
+    );
+  });
+}
+
 function renderTiers() {
   tiersContainer.innerHTML = "";
 
+  const visiblePlayers = getVisiblePlayers();
+
   TIER_GROUPS.forEach((group, groupIndex) => {
-    const groupPlayers = state.players.filter((player) => player.tier === group.name);
+    const groupPlayers = visiblePlayers.filter((player) => player.tier === group.name);
+
+    if (searchQuery && groupPlayers.length === 0) return;
 
     const section = document.createElement("section");
     section.className = "tier-section";
@@ -259,9 +354,11 @@ function renderTiers() {
     const subTierList = section.querySelector(".sub-tier-list");
 
     group.subs.forEach((sub, subIndex) => {
-      const subPlayers = state.players.filter((player) => {
+      const subPlayers = visiblePlayers.filter((player) => {
         return player.tier === group.name && player.subTier === sub;
       });
+
+      if (searchQuery && subPlayers.length === 0) return;
 
       const block = document.createElement("div");
       block.className = "sub-tier-block";
@@ -290,6 +387,18 @@ function renderTiers() {
 
     tiersContainer.appendChild(section);
   });
+
+  if (searchQuery && tiersContainer.innerHTML.trim() === "") {
+    tiersContainer.innerHTML = `
+      <section class="tier-section">
+        <div class="tier-header">
+          <div class="tier-title">검색 결과 없음</div>
+          <div class="tier-count">0명</div>
+        </div>
+        <div class="sub-tier-empty">검색어와 일치하는 인원이 없습니다.</div>
+      </section>
+    `;
+  }
 }
 
 function createPlayerRow(player) {
@@ -376,10 +485,7 @@ async function addRecord(playerId, result) {
   const records = [...player.records, result].slice(-20);
 
   try {
-    await update(ref(db, `${ROOT_PATH}/players/${playerId}`), {
-      records
-    });
-
+    await update(ref(db, `${ROOT_PATH}/players/${playerId}`), { records });
     await updateMeta();
   } catch (error) {
     alertWriteError(error);
@@ -400,11 +506,40 @@ async function undoRecord(playerId) {
   const records = player.records.slice(0, -1);
 
   try {
-    await update(ref(db, `${ROOT_PATH}/players/${playerId}`), {
-      records
-    });
-
+    await update(ref(db, `${ROOT_PATH}/players/${playerId}`), { records });
     await updateMeta();
+  } catch (error) {
+    alertWriteError(error);
+  }
+}
+
+async function resetAllRecords() {
+  if (!requireAdmin()) return;
+
+  if (state.players.length === 0) {
+    alert("초기화할 인원이 없습니다.");
+    return;
+  }
+
+  if (
+    !confirm(
+      `모든 인원의 최근 전적을 초기화할까요?\n\n멤버 ${state.players.length}명은 유지되고, 승/패 기록만 삭제됩니다.`
+    )
+  ) {
+    return;
+  }
+
+  const updates = {};
+
+  state.players.forEach((player) => {
+    updates[`${ROOT_PATH}/players/${player.id}/records`] = [];
+  });
+
+  updates[`${ROOT_PATH}/meta`] = createMeta();
+
+  try {
+    await update(ref(db), updates);
+    alert("최근 전적 초기화 완료!");
   } catch (error) {
     alertWriteError(error);
   }
