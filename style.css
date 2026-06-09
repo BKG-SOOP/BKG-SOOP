@@ -758,3 +758,26 @@ select {
     font-size: 20px;
   }
 }
+
+/* 드롭다운 목록 가독성 수정 */
+.form select {
+  color-scheme: dark;
+  background-color: #111722;
+  color: #f6f8fb;
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.form select option {
+  background-color: #111722;
+  color: #f6f8fb;
+}
+
+.form select option:checked {
+  background-color: #2f58ea;
+  color: #ffffff;
+}
+
+.form select option:hover {
+  background-color: #22345f;
+  color: #ffffff;
+}
