@@ -809,3 +809,36 @@ select {
 .player-name {
   font-size: 16px;
 }
+
+/* 풀네임 + 두글자 닉네임 표시 */
+.player-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.player-short {
+  display: inline-flex;
+  width: fit-content;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(255, 225, 77, 0.14);
+  border: 1px solid rgba(255, 225, 77, 0.26);
+  color: #ffe14d;
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.player-short.empty-short {
+  color: #8a8f9b;
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.player-full {
+  color: #f6f8fb;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.25;
+}
