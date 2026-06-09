@@ -491,56 +491,199 @@ function openAddRecordModal() {
     return;
   }
 
-  const playerOptions = state.players
-    .map((player) => {
-      const label = `${player.shortName || "--"} / ${player.name} / ${player.tier} / ${player.subTier}`;
-
-      return `
-        <option value="${player.id}">
-          ${escapeHtml(label)}
-        </option>
-      `;
-    })
-    .join("");
-
   openModal(
-    "전적 추가",
+    "전적 일괄 추가",
     `
       <form class="form" id="addRecordForm">
-        <label>
-          닉네임 선택
-          <select id="recordPlayer">
-            ${playerOptions}
-          </select>
-        </label>
+        <div class="bulk-record-box">
+          <div class="bulk-area-wrap">
+            <div class="bulk-area-title">
+              <span>승리 인원</span>
+              <span class="hint">탭 / 줄바꿈 / 쉼표로 구분</span>
+            </div>
+            <textarea
+              id="winnerText"
+              class="bulk-textarea bulk-win"
+              placeholder="예: 해원	수힛	수피	부기"
+              autocomplete="off"
+            ></textarea>
+          </div>
 
-        <label>
-          결과 선택
-          <select id="recordResult">
-            <option value="W">승리</option>
-            <option value="L">패배</option>
-          </select>
-        </label>
+          <div class="bulk-area-wrap">
+            <div class="bulk-area-title">
+              <span>패배 인원</span>
+              <span class="hint">탭 / 줄바꿈 / 쉼표로 구분</span>
+            </div>
+            <textarea
+              id="loserText"
+              class="bulk-textarea bulk-loss"
+              placeholder="예: 아칸	흑구	프로	성장"
+              autocomplete="off"
+            ></textarea>
+          </div>
+        </div>
+
+        <div class="bulk-help">
+          두글자 닉네임 또는 풀네임으로 입력할 수 있어요.<br>
+          예: <b>해원</b> 또는 <b>hyewon_n</b>
+        </div>
 
         <div class="form-actions">
-          <button type="submit" class="submit-btn">저장</button>
+          <button type="submit" class="submit-btn">전적 추가</button>
           <button type="button" class="cancel-btn" data-close>취소</button>
         </div>
       </form>
-    `
+    `,
+    "wide-modal"
   );
 
   document.getElementById("addRecordForm").addEventListener("submit", async (event) => {
     event.preventDefault();
 
-    const playerId = document.getElementById("recordPlayer").value;
-    const result = document.getElementById("recordResult").value;
+    const winnerNames = parseBulkNames(document.getElementById("winnerText").value);
+    const loserNames = parseBulkNames(document.getElementById("loserText").value);
 
-    await addRecord(playerId, result);
-    closeModal();
+    await addBulkRecords(winnerNames, loserNames);
   });
 
   bindCloseButtons();
+}
+
+function parseBulkNames(text) {
+  return text
+    .split(/[\t\n\r,，、/]+/g)
+    .map((name) => name.trim())
+    .filter(Boolean);
+}
+
+async function addBulkRecords(winnerNames, loserNames) {
+  if (!requireAdmin()) return;
+
+  if (winnerNames.length === 0 && loserNames.length === 0) {
+    alert("승리 인원 또는 패배 인원을 입력해 주세요.");
+    return;
+  }
+
+  const duplicatedInWinner = findDuplicatedNames(winnerNames);
+  const duplicatedInLoser = findDuplicatedNames(loserNames);
+
+  if (duplicatedInWinner.length > 0) {
+    alert(`승리 인원에 중복 입력이 있습니다.\n\n${duplicatedInWinner.join(", ")}`);
+    return;
+  }
+
+  if (duplicatedInLoser.length > 0) {
+    alert(`패배 인원에 중복 입력이 있습니다.\n\n${duplicatedInLoser.join(", ")}`);
+    return;
+  }
+
+  const overlap = winnerNames.filter((name) => {
+    return loserNames.some((other) => normalizeName(other) === normalizeName(name));
+  });
+
+  if (overlap.length > 0) {
+    alert(`승리/패배 양쪽에 모두 입력된 인원이 있습니다.\n\n${overlap.join(", ")}`);
+    return;
+  }
+
+  const winnerPlayers = [];
+  const loserPlayers = [];
+  const notFound = [];
+
+  winnerNames.forEach((name) => {
+    const player = findPlayerByInputName(name);
+
+    if (player) {
+      winnerPlayers.push(player);
+    } else {
+      notFound.push(`[승리] ${name}`);
+    }
+  });
+
+  loserNames.forEach((name) => {
+    const player = findPlayerByInputName(name);
+
+    if (player) {
+      loserPlayers.push(player);
+    } else {
+      notFound.push(`[패배] ${name}`);
+    }
+  });
+
+  if (notFound.length > 0) {
+    alert(
+      "등록된 인원 중 찾을 수 없는 이름이 있습니다.\n\n" +
+      notFound.join("\n") +
+      "\n\n두글자 닉네임 또는 풀네임이 정확한지 확인해 주세요."
+    );
+    return;
+  }
+
+  const allTargetPlayers = [...winnerPlayers, ...loserPlayers];
+
+  if (allTargetPlayers.length === 0) {
+    alert("전적을 추가할 인원이 없습니다.");
+    return;
+  }
+
+  const updates = {};
+
+  winnerPlayers.forEach((player) => {
+    const records = [...player.records, "W"].slice(-20);
+    updates[`${ROOT_PATH}/players/${player.id}/records`] = records;
+  });
+
+  loserPlayers.forEach((player) => {
+    const records = [...player.records, "L"].slice(-20);
+    updates[`${ROOT_PATH}/players/${player.id}/records`] = records;
+  });
+
+  updates[`${ROOT_PATH}/meta`] = createMeta();
+
+  try {
+    await update(ref(db), updates);
+    closeModal();
+
+    alert(
+      `전적 추가 완료!\n\n승리: ${winnerPlayers.length}명\n패배: ${loserPlayers.length}명`
+    );
+  } catch (error) {
+    alertWriteError(error);
+  }
+}
+
+function findPlayerByInputName(inputName) {
+  const target = normalizeName(inputName);
+
+  return state.players.find((player) => {
+    const fullName = normalizeName(player.name);
+    const shortName = normalizeName(player.shortName || "");
+
+    return fullName === target || shortName === target;
+  });
+}
+
+function findDuplicatedNames(names) {
+  const seen = new Set();
+  const duplicated = [];
+
+  names.forEach((name) => {
+    const key = normalizeName(name);
+
+    if (seen.has(key)) {
+      duplicated.push(name);
+    } else {
+      seen.add(key);
+    }
+  });
+
+  return duplicated;
+}
+
+function normalizeName(name) {
+  return String(name || "")
+    .trim()
+    .toLowerCase();
 }
 
 function openAddPlayerModal() {
@@ -853,7 +996,13 @@ function getSubTierId(groupIndex, subIndex) {
   return `tier-${groupIndex}-sub-${subIndex}`;
 }
 
-function openModal(title, bodyHtml) {
+function openModal(title, bodyHtml, modalClass = "") {
+  const modalBox = modal.querySelector(".modal-box");
+
+  modalBox.className = modalClass
+    ? `modal-box ${modalClass}`
+    : "modal-box";
+
   modalTitle.textContent = title;
   modalBody.innerHTML = bodyHtml;
   modal.classList.remove("hidden");
@@ -862,6 +1011,9 @@ function openModal(title, bodyHtml) {
 function closeModal() {
   modal.classList.add("hidden");
   modalBody.innerHTML = "";
+
+  const modalBox = modal.querySelector(".modal-box");
+  modalBox.className = "modal-box";
 }
 
 function bindCloseButtons() {
