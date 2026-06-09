@@ -1,3 +1,36 @@
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+
+import {
+  getDatabase,
+  ref,
+  onValue,
+  set,
+  update,
+  remove
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js";
+
+import {
+  getAuth,
+  signInWithEmailAndPassword,
+  signOut,
+  onAuthStateChanged
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyBH3ccNKz5P7shmcgtHTTCK-Yg_LtoW4-4",
+  authDomain: "bkg-soop.firebaseapp.com",
+  databaseURL: "https://bkg-soop-default-rtdb.firebaseio.com",
+  projectId: "bkg-soop",
+  storageBucket: "bkg-soop.firebasestorage.app",
+  messagingSenderId: "569354931997",
+  appId: "1:569354931997:web:e5acdc63a6aa8a53871bf4",
+  measurementId: "G-SRFPHLCMDL"
+};
+
+const ADMIN_UID = "7rYEhRouIuZdEK3bRoQtYUz7arW2";
+const ADMIN_EMAIL_DOMAIN = "bkg-soop.com";
+const ROOT_PATH = "bkgSoopRecordBoard";
+
 const TIER_GROUPS = [
   {
     name: "0티어",
@@ -17,39 +50,17 @@ const TIER_GROUPS = [
   }
 ];
 
-// 첫 번째 테스트용 관리자 비밀번호.
-// Firebase 연결 전까지만 쓰는 임시 방식.
-// 실제 공개 사이트에서는 이 방식은 보안용으로 쓰면 안 돼.
-const ADMIN_PASSWORD = "1234";
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+const auth = getAuth(app);
 
-const STORAGE_KEY = "bkg-soop-records-v2";
+const rootRef = ref(db, ROOT_PATH);
 
+let currentUser = null;
 let isAdmin = false;
 
 let state = {
-  players: [
-    {
-      id: createId(),
-      name: "해원",
-      tier: "0티어",
-      subTier: "GOD",
-      records: ["W", "W", "L", "W"]
-    },
-    {
-      id: createId(),
-      name: "아칸",
-      tier: "1티어",
-      subTier: "최상",
-      records: ["L", "W", "W"]
-    },
-    {
-      id: createId(),
-      name: "흑구",
-      tier: "2티어",
-      subTier: "상",
-      records: []
-    }
-  ],
+  players: [],
   updatedAt: ""
 };
 
@@ -58,6 +69,7 @@ const tierNav = document.getElementById("tierNav");
 const totalPlayersEl = document.getElementById("totalPlayers");
 const totalGamesEl = document.getElementById("totalGames");
 const updatedAtEl = document.getElementById("updatedAt");
+const connectStatusEl = document.getElementById("connectStatus");
 
 const loginBtn = document.getElementById("loginBtn");
 const addRecordBtn = document.getElementById("addRecordBtn");
@@ -69,13 +81,46 @@ const modalTitle = document.getElementById("modalTitle");
 const modalBody = document.getElementById("modalBody");
 const modalClose = document.getElementById("modalClose");
 
-load();
 render();
 
-loginBtn.addEventListener("click", () => {
-  if (isAdmin) {
-    isAdmin = false;
+onAuthStateChanged(auth, (user) => {
+  currentUser = user;
+  isAdmin = Boolean(user && user.uid === ADMIN_UID);
+
+  render();
+
+  if (user && !isAdmin) {
+    alert("관리자 권한이 없는 계정입니다.");
+    signOut(auth);
+  }
+});
+
+onValue(
+  rootRef,
+  (snapshot) => {
+    const data = snapshot.val();
+
+    if (!data) {
+      state = {
+        players: [],
+        updatedAt: ""
+      };
+    } else {
+      state = convertFirebaseData(data);
+    }
+
+    connectStatusEl.textContent = "Firebase 연결 완료";
     render();
+  },
+  (error) => {
+    connectStatusEl.textContent = "Firebase 연결 실패";
+    alert(`Firebase 데이터를 불러오지 못했습니다.\n${error.message}`);
+  }
+);
+
+loginBtn.addEventListener("click", async () => {
+  if (isAdmin) {
+    await signOut(auth);
     return;
   }
 
@@ -83,25 +128,27 @@ loginBtn.addEventListener("click", () => {
 });
 
 addRecordBtn.addEventListener("click", () => {
-  if (!isAdmin) {
-    openLoginModal();
-    return;
-  }
-
+  if (!requireAdmin()) return;
   openAddRecordModal();
 });
 
 addPlayerBtn.addEventListener("click", () => {
+  if (!requireAdmin()) return;
   openAddPlayerModal();
 });
 
-resetAllBtn.addEventListener("click", () => {
+resetAllBtn.addEventListener("click", async () => {
+  if (!requireAdmin()) return;
   if (!confirm("전체 데이터를 초기화할까요?")) return;
 
-  state.players = [];
-  touch();
-  save();
-  render();
+  try {
+    await set(rootRef, {
+      players: {},
+      meta: createMeta()
+    });
+  } catch (error) {
+    alertWriteError(error);
+  }
 });
 
 modalClose.addEventListener("click", closeModal);
@@ -110,55 +157,33 @@ modal.addEventListener("click", (event) => {
   if (event.target === modal) closeModal();
 });
 
-function load() {
-  const saved = localStorage.getItem(STORAGE_KEY);
-
-  if (!saved) {
-    touch();
-    save();
-    return;
-  }
-
-  try {
-    state = JSON.parse(saved);
-    normalizeState();
-  } catch {
-    touch();
-    save();
-  }
-}
-
-function normalizeState() {
-  if (!state || !Array.isArray(state.players)) {
-    state = {
-      players: [],
-      updatedAt: ""
-    };
-  }
-
-  state.players = state.players.map((player) => {
+function convertFirebaseData(data) {
+  const rawPlayers = data.players || {};
+  const players = Object.entries(rawPlayers).map(([id, player]) => {
     const tier = isValidTier(player.tier) ? player.tier : "0티어";
     const subTier = isValidSubTier(tier, player.subTier)
       ? player.subTier
       : getDefaultSubTier(tier);
 
     return {
-      id: player.id || createId(),
+      id,
       name: player.name || "이름없음",
       tier,
       subTier,
-      records: Array.isArray(player.records) ? player.records.slice(-20) : []
+      records: Array.isArray(player.records) ? player.records.slice(-20) : [],
+      createdAt: player.createdAt || 0
     };
   });
-}
 
-function save() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-}
+  players.sort((a, b) => {
+    if (a.createdAt !== b.createdAt) return a.createdAt - b.createdAt;
+    return a.name.localeCompare(b.name, "ko");
+  });
 
-function touch() {
-  const now = new Date();
-  state.updatedAt = now.toLocaleString("ko-KR");
+  return {
+    players,
+    updatedAt: data.meta?.updatedAt || ""
+  };
 }
 
 function render() {
@@ -323,22 +348,28 @@ function createPlayerRow(player) {
   return row;
 }
 
-function addRecord(playerId, result) {
+async function addRecord(playerId, result) {
+  if (!requireAdmin()) return;
+
   const player = state.players.find((p) => p.id === playerId);
   if (!player) return;
 
-  player.records.push(result);
+  const records = [...player.records, result].slice(-20);
 
-  if (player.records.length > 20) {
-    player.records = player.records.slice(-20);
+  try {
+    await update(ref(db, `${ROOT_PATH}/players/${playerId}`), {
+      records
+    });
+
+    await updateMeta();
+  } catch (error) {
+    alertWriteError(error);
   }
-
-  touch();
-  save();
-  render();
 }
 
-function undoRecord(playerId) {
+async function undoRecord(playerId) {
+  if (!requireAdmin()) return;
+
   const player = state.players.find((p) => p.id === playerId);
   if (!player) return;
 
@@ -347,24 +378,33 @@ function undoRecord(playerId) {
     return;
   }
 
-  player.records.pop();
+  const records = player.records.slice(0, -1);
 
-  touch();
-  save();
-  render();
+  try {
+    await update(ref(db, `${ROOT_PATH}/players/${playerId}`), {
+      records
+    });
+
+    await updateMeta();
+  } catch (error) {
+    alertWriteError(error);
+  }
 }
 
-function deletePlayer(playerId) {
+async function deletePlayer(playerId) {
+  if (!requireAdmin()) return;
+
   const player = state.players.find((p) => p.id === playerId);
   if (!player) return;
 
   if (!confirm(`${player.name} 님을 삭제할까요?`)) return;
 
-  state.players = state.players.filter((p) => p.id !== playerId);
-
-  touch();
-  save();
-  render();
+  try {
+    await remove(ref(db, `${ROOT_PATH}/players/${playerId}`));
+    await updateMeta();
+  } catch (error) {
+    alertWriteError(error);
+  }
 }
 
 function openLoginModal() {
@@ -373,8 +413,13 @@ function openLoginModal() {
     `
       <form class="form" id="loginForm">
         <label>
-          관리자 비밀번호
-          <input type="password" id="passwordInput" placeholder="비밀번호 입력" autocomplete="off" />
+          아이디
+          <input type="text" id="loginIdInput" placeholder="예: admin" autocomplete="username" />
+        </label>
+
+        <label>
+          비밀번호
+          <input type="password" id="passwordInput" placeholder="비밀번호 입력" autocomplete="current-password" />
         </label>
 
         <div class="form-actions">
@@ -384,25 +429,38 @@ function openLoginModal() {
       </form>
 
       <div class="notice">
-        첫 번째 테스트 버전 비밀번호는 <b>1234</b>입니다.<br>
-        Firebase 연결 후에는 실제 관리자 로그인 방식으로 바꿀 예정입니다.
+        이메일 전체가 아니라 <b>@${ADMIN_EMAIL_DOMAIN}</b> 앞부분만 입력하면 됩니다.<br>
+        예: admin@${ADMIN_EMAIL_DOMAIN} → admin
       </div>
+
+      <div id="loginError" class="error-text hidden"></div>
     `
   );
 
-  document.getElementById("loginForm").addEventListener("submit", (event) => {
+  document.getElementById("loginForm").addEventListener("submit", async (event) => {
     event.preventDefault();
 
+    const idValue = document.getElementById("loginIdInput").value.trim();
     const password = document.getElementById("passwordInput").value;
+    const errorEl = document.getElementById("loginError");
 
-    if (password !== ADMIN_PASSWORD) {
-      alert("비밀번호가 틀렸습니다.");
+    if (!idValue || !password) {
+      errorEl.textContent = "아이디와 비밀번호를 모두 입력해 주세요.";
+      errorEl.classList.remove("hidden");
       return;
     }
 
-    isAdmin = true;
-    closeModal();
-    render();
+    const email = idValue.includes("@")
+      ? idValue
+      : `${idValue}@${ADMIN_EMAIL_DOMAIN}`;
+
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+      closeModal();
+    } catch (error) {
+      errorEl.textContent = getLoginErrorMessage(error);
+      errorEl.classList.remove("hidden");
+    }
   });
 
   bindCloseButtons();
@@ -451,13 +509,13 @@ function openAddRecordModal() {
     `
   );
 
-  document.getElementById("addRecordForm").addEventListener("submit", (event) => {
+  document.getElementById("addRecordForm").addEventListener("submit", async (event) => {
     event.preventDefault();
 
     const playerId = document.getElementById("recordPlayer").value;
     const result = document.getElementById("recordResult").value;
 
-    addRecord(playerId, result);
+    await addRecord(playerId, result);
     closeModal();
   });
 
@@ -507,7 +565,7 @@ function openAddPlayerModal() {
     fillSubTierOptions(tierSelect.value, subTierSelect);
   });
 
-  document.getElementById("addPlayerForm").addEventListener("submit", (event) => {
+  document.getElementById("addPlayerForm").addEventListener("submit", async (event) => {
     event.preventDefault();
 
     const name = document.getElementById("playerName").value.trim();
@@ -526,18 +584,23 @@ function openAddPlayerModal() {
       return;
     }
 
-    state.players.push({
-      id: createId(),
+    const id = createId();
+
+    const newPlayer = {
       name,
       tier,
       subTier,
-      records: []
-    });
+      records: [],
+      createdAt: Date.now()
+    };
 
-    touch();
-    save();
-    closeModal();
-    render();
+    try {
+      await set(ref(db, `${ROOT_PATH}/players/${id}`), newPlayer);
+      await updateMeta();
+      closeModal();
+    } catch (error) {
+      alertWriteError(error);
+    }
   });
 
   bindCloseButtons();
@@ -590,16 +653,20 @@ function openMoveTierModal(playerId) {
     fillSubTierOptions(tierSelect.value, subTierSelect);
   });
 
-  document.getElementById("moveTierForm").addEventListener("submit", (event) => {
+  document.getElementById("moveTierForm").addEventListener("submit", async (event) => {
     event.preventDefault();
 
-    player.tier = tierSelect.value;
-    player.subTier = subTierSelect.value;
+    try {
+      await update(ref(db, `${ROOT_PATH}/players/${playerId}`), {
+        tier: tierSelect.value,
+        subTier: subTierSelect.value
+      });
 
-    touch();
-    save();
-    closeModal();
-    render();
+      await updateMeta();
+      closeModal();
+    } catch (error) {
+      alertWriteError(error);
+    }
   });
 
   bindCloseButtons();
@@ -615,6 +682,24 @@ function fillSubTierOptions(tierName, selectEl, selectedSubTier = "") {
       return `<option value="${sub}" ${selected}>${sub}</option>`;
     })
     .join("");
+}
+
+function requireAdmin() {
+  if (isAdmin) return true;
+
+  openLoginModal();
+  return false;
+}
+
+async function updateMeta() {
+  await update(ref(db, `${ROOT_PATH}/meta`), createMeta());
+}
+
+function createMeta() {
+  return {
+    updatedAt: new Date().toLocaleString("ko-KR"),
+    updatedBy: currentUser ? currentUser.uid : ""
+  };
 }
 
 function getTierGroup(tierName) {
@@ -673,4 +758,31 @@ function createId() {
   }
 
   return `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function alertWriteError(error) {
+  alert(
+    "저장에 실패했습니다.\n\n" +
+    "1. 관리자 계정으로 로그인했는지 확인해 주세요.\n" +
+    "2. Realtime Database 규칙의 UID가 맞는지 확인해 주세요.\n\n" +
+    error.message
+  );
+}
+
+function getLoginErrorMessage(error) {
+  switch (error.code) {
+    case "auth/invalid-credential":
+    case "auth/wrong-password":
+    case "auth/user-not-found":
+      return "아이디 또는 비밀번호가 올바르지 않습니다.";
+
+    case "auth/too-many-requests":
+      return "로그인 시도가 너무 많습니다. 잠시 후 다시 시도해 주세요.";
+
+    case "auth/unauthorized-domain":
+      return "현재 사이트 도메인이 Firebase Auth 허용 도메인에 등록되지 않았습니다.";
+
+    default:
+      return `로그인 실패: ${error.message}`;
+  }
 }
