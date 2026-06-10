@@ -1006,11 +1006,11 @@ textarea {
 .top-rank-panel {
   position: fixed;
   top: 180px;
-  right: 268px;
-  width: 300px;
-  max-height: calc(100vh - 204px);
-  overflow-y: auto;
-  padding: 18px;
+  right: 320px;
+  width: 310px;
+  max-height: none;
+  overflow-y: visible;
+  padding: 15px;
   border-radius: 24px;
   background:
     linear-gradient(180deg, rgba(18, 22, 34, 0.94), rgba(10, 14, 22, 0.96));
@@ -1034,7 +1034,7 @@ textarea {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .top-rank-eyebrow {
@@ -1048,7 +1048,7 @@ textarea {
 .top-rank-head h2 {
   margin: 0;
   color: #ffffff;
-  font-size: 20px;
+  font-size: 19px;
   font-weight: 900;
   letter-spacing: -0.02em;
 }
@@ -1070,7 +1070,7 @@ textarea {
 }
 
 .top-rank-desc {
-  margin-bottom: 14px;
+  margin-bottom: 10px;
   color: #8690a3;
   font-size: 12px;
   line-height: 1.5;
@@ -1079,7 +1079,7 @@ textarea {
 .top-rank-list {
   display: flex;
   flex-direction: column;
-  gap: 9px;
+  gap: 6px;
 }
 
 .top-rank-item {
@@ -1087,7 +1087,7 @@ textarea {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px;
+  padding: 8px 10px;
   border-radius: 16px;
   background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
   border: 1px solid rgba(255,255,255,0.07);
@@ -1097,13 +1097,13 @@ textarea {
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
 .top-rank-no {
   flex-shrink: 0;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   border-radius: 10px;
   display: inline-flex;
   align-items: center;
@@ -1121,7 +1121,7 @@ textarea {
 
 .top-rank-name {
   color: #ffffff;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 900;
   line-height: 1.2;
   white-space: nowrap;
@@ -1131,7 +1131,7 @@ textarea {
 }
 
 .top-rank-full {
-  margin-top: 3px;
+  margin-top: 2px;
   color: #8690a3;
   font-size: 11px;
   font-weight: 700;
@@ -1149,13 +1149,13 @@ textarea {
 
 .top-rank-rate {
   color: #ffe14d;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 900;
   line-height: 1.2;
 }
 
 .top-rank-record {
-  margin-top: 3px;
+  margin-top: 2px;
   color: #c8d0dd;
   font-size: 11px;
   font-weight: 800;
@@ -1184,8 +1184,8 @@ textarea {
 
 @media (max-width: 1500px) {
   .top-rank-panel {
-    right: 250px;
-    width: 280px;
+    right: 285px;
+    width: 300px;
   }
 }
 
