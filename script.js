@@ -343,8 +343,8 @@ function renderTopWinRate() {
   listEl.innerHTML = rankedPlayers
     .map((player, index) => {
       const rank = index + 1;
-      const displayName = player.shortName || player.name;
-      const fullName = player.shortName ? player.name : "";
+      const displayName = player.name;
+      const subName = player.shortName || "";
       const rate = `${(player.winRateValue * 100).toFixed(1)}%`;
 
       return `
@@ -354,8 +354,8 @@ function renderTopWinRate() {
             <div class="top-rank-name-wrap">
               <div class="top-rank-name">${escapeHtml(displayName)}</div>
               ${
-                fullName
-                  ? `<div class="top-rank-full">${escapeHtml(fullName)}</div>`
+                subName
+                  ? `<div class="top-rank-full">${escapeHtml(subName)}</div>`
                   : ""
               }
             </div>
@@ -402,13 +402,13 @@ function getVisiblePlayers() {
   const query = normalizeName(searchQuery);
 
   return state.players.filter((player) => {
-    const fullName = normalizeName(player.name);
+    const subName = normalizeName(player.name);
     const shortName = normalizeName(player.shortName || "");
     const tier = normalizeName(player.tier);
     const subTier = normalizeName(player.subTier);
 
     return (
-      fullName.includes(query) ||
+      subName.includes(query) ||
       shortName.includes(query) ||
       tier.includes(query) ||
       subTier.includes(query)
@@ -881,10 +881,10 @@ function findPlayerByInputName(inputName) {
   const target = normalizeName(inputName);
 
   return state.players.find((player) => {
-    const fullName = normalizeName(player.name);
+    const subName = normalizeName(player.name);
     const shortName = normalizeName(player.shortName || "");
 
-    return fullName === target || shortName === target;
+    return subName === target || shortName === target;
   });
 }
 
