@@ -729,7 +729,7 @@ function openAddRecordModal() {
             <textarea
               id="winnerText"
               class="bulk-textarea bulk-win"
-              placeholder="예: 해원	수힛	수피	부기"
+              placeholder="예: 해원 혜원 연진 나닝"
               autocomplete="off"
             ></textarea>
           </div>
@@ -742,7 +742,7 @@ function openAddRecordModal() {
             <textarea
               id="loserText"
               class="bulk-textarea bulk-loss"
-              placeholder="예: 아칸	흑구	프로	성장"
+              placeholder="예: 해원 혜원 연진 나닝"
               autocomplete="off"
             ></textarea>
           </div>
@@ -750,7 +750,7 @@ function openAddRecordModal() {
 
         <div class="bulk-help">
           두글자 닉네임 또는 풀네임으로 입력할 수 있어요.<br>
-          예: <b>해원</b> 또는 <b>hyewon_n</b>
+          예: <b>해원</b> 또는 <b>박해원</b>
         </div>
 
         <div class="form-actions">
