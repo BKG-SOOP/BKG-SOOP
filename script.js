@@ -37,6 +37,7 @@ const ARCHIVE_MATCHES_PATH = `${ROOT_PATH}/archiveMatches`;
 const MEMBER_ARCHIVE_PATH = `${ROOT_PATH}/memberArchive`;
 const MONTHLY_MATCHES_PATH = `${ROOT_PATH}/monthlyMatches`;
 const MONTHLY_STATS_PATH = `${ROOT_PATH}/monthlyStats`;
+const MANUAL_ADJUSTMENTS_PATH = `${ROOT_PATH}/manualAdjustments`;
 const INITIAL_IMPORT_PATH = `${ROOT_PATH}/archiveInitialImport`;
 
 const TIER_GROUPS = [
@@ -237,7 +238,27 @@ function createTopWinRatePanel() {
 
 function createArchiveAdminTools() {
   const sideActions = document.querySelector(".admin-only.side-actions");
-  if (!sideActions || document.getElementById("initialArchiveSyncBtn")) return;
+  if (!sideActions || document.getElementById("archiveManageBtn")) return;
+
+  const archiveManageBtn = document.createElement("button");
+  archiveManageBtn.id = "archiveManageBtn";
+  archiveManageBtn.className = "side-btn";
+  archiveManageBtn.type = "button";
+  archiveManageBtn.textContent = "BKG.GG 전적 관리";
+  archiveManageBtn.addEventListener("click", () => {
+    if (!requireAdmin()) return;
+    openArchiveManagerModal();
+  });
+
+  const manualAdjustBtn = document.createElement("button");
+  manualAdjustBtn.id = "manualAdjustmentBtn";
+  manualAdjustBtn.className = "side-btn";
+  manualAdjustBtn.type = "button";
+  manualAdjustBtn.textContent = "BKG.GG 누적 보정";
+  manualAdjustBtn.addEventListener("click", () => {
+    if (!requireAdmin()) return;
+    openManualAdjustmentModal();
+  });
 
   const initialBtn = document.createElement("button");
   initialBtn.id = "initialArchiveSyncBtn";
@@ -259,10 +280,11 @@ function createArchiveAdminTools() {
     await cancelLatestBulkArchiveMatch();
   });
 
+  sideActions.appendChild(archiveManageBtn);
+  sideActions.appendChild(manualAdjustBtn);
   sideActions.appendChild(initialBtn);
   sideActions.appendChild(cancelBulkBtn);
 }
-
 
 function convertFirebaseData(data) {
   const rawPlayers = data.players || {};
@@ -683,7 +705,8 @@ async function resetPlayerRecords(playerId) {
 
   try {
     await update(ref(db, `${ROOT_PATH}/players/${playerId}`), {
-      records: []
+      records: [],
+      recordArchiveIds: []
     });
 
     await updateMeta();
@@ -1065,6 +1088,267 @@ async function addArchiveRemovalUpdates(updates, player, matchId, expectedResult
   updates[`${ARCHIVE_MATCHES_PATH}/${matchId}/loserIds`] = loserIds;
   updates[`${ARCHIVE_MATCHES_PATH}/${matchId}/winnerNames`] = winnerNames;
   updates[`${ARCHIVE_MATCHES_PATH}/${matchId}/loserNames`] = loserNames;
+}
+
+
+async function openArchiveManagerModal() {
+  if (!requireAdmin()) return;
+
+  openModal(
+    "BKG.GG 전적 관리",
+    `
+      <div class="notice">
+        테스트용 일괄 전적이나 잘못 입력된 archive 전적을 삭제할 수 있습니다.<br>
+        삭제 시 archiveMatches, memberArchive, monthlyMatches와 연결된 최근 30전 기록을 함께 정리합니다.
+      </div>
+      <div id="archiveManagerList" class="archive-manager-list">
+        archive 전적을 불러오는 중입니다...
+      </div>
+    `,
+    "wide-modal"
+  );
+
+  try {
+    const snapshot = await get(ref(db, ARCHIVE_MATCHES_PATH));
+    const rawMatches = snapshot.val() || {};
+    const matches = Object.entries(rawMatches)
+      .map(([matchId, match]) => ({ matchId, ...match }))
+      .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
+      .slice(0, 50);
+
+    const listEl = document.getElementById("archiveManagerList");
+    if (!listEl) return;
+
+    if (matches.length === 0) {
+      listEl.innerHTML = `<div class="archive-empty">삭제할 archive 전적이 없습니다.</div>`;
+      return;
+    }
+
+    listEl.innerHTML = matches.map((match) => {
+      const winnerNames = Array.isArray(match.winnerNames) ? match.winnerNames : [];
+      const loserNames = Array.isArray(match.loserNames) ? match.loserNames : [];
+      const winnerCount = Array.isArray(match.winnerIds) ? match.winnerIds.length : winnerNames.length;
+      const loserCount = Array.isArray(match.loserIds) ? match.loserIds.length : loserNames.length;
+      const sourceLabel = match.source === "bulkRecord" ? "일괄 추가" : escapeHtml(match.source || "archive");
+
+      return `
+        <div class="archive-item">
+          <div class="archive-info">
+            <div class="archive-title">${escapeHtml(match.date || "날짜 없음")} · ${sourceLabel}</div>
+            <div class="archive-teams">
+              <b>승리</b> ${escapeHtml(winnerNames.join(", ") || `${winnerCount}명`)}<br>
+              <b>패배</b> ${escapeHtml(loserNames.join(", ") || `${loserCount}명`)}
+            </div>
+            <div class="archive-match-id">${escapeHtml(match.matchId)}</div>
+          </div>
+          <button class="mini-btn danger archive-delete-btn" type="button" data-delete-archive="${escapeAttr(match.matchId)}">삭제</button>
+        </div>
+      `;
+    }).join("");
+
+    listEl.querySelectorAll("[data-delete-archive]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        await deleteArchiveMatch(button.dataset.deleteArchive);
+      });
+    });
+  } catch (error) {
+    alertWriteError(error);
+  }
+}
+
+async function deleteArchiveMatch(matchId) {
+  if (!requireAdmin()) return;
+  if (!matchId) return;
+
+  const snapshot = await get(ref(db, `${ARCHIVE_MATCHES_PATH}/${matchId}`));
+  const match = snapshot.val();
+
+  if (!match) {
+    alert("이미 삭제되었거나 존재하지 않는 archive 전적입니다.");
+    return;
+  }
+
+  const winnerIds = Array.isArray(match.winnerIds) ? match.winnerIds : [];
+  const loserIds = Array.isArray(match.loserIds) ? match.loserIds : [];
+  const winnerNames = Array.isArray(match.winnerNames) ? match.winnerNames : [];
+  const loserNames = Array.isArray(match.loserNames) ? match.loserNames : [];
+
+  if (!confirm(`이 archive 전적을 삭제할까요?\n\n날짜: ${match.date || "-"}\n승리: ${winnerNames.join(", ") || winnerIds.length + "명"}\n패배: ${loserNames.join(", ") || loserIds.length + "명"}\n\nBKG.GG 누적/월별/참여율에서 제외되고, 연결된 최근 30전 기록도 함께 정리됩니다.`)) {
+    return;
+  }
+
+  const updates = {};
+
+  winnerIds.forEach((playerId) => {
+    updates[`${MEMBER_ARCHIVE_PATH}/${playerId}/${matchId}`] = null;
+
+    const player = state.players.find((item) => item.id === playerId);
+    if (!player) return;
+
+    const recent = removeMatchFromPlayerRecent(player, matchId, "W");
+    if (!recent) return;
+
+    updates[`${ROOT_PATH}/players/${playerId}/records`] = recent.records;
+    updates[`${ROOT_PATH}/players/${playerId}/recordArchiveIds`] = recent.recordArchiveIds;
+  });
+
+  loserIds.forEach((playerId) => {
+    updates[`${MEMBER_ARCHIVE_PATH}/${playerId}/${matchId}`] = null;
+
+    const player = state.players.find((item) => item.id === playerId);
+    if (!player) return;
+
+    const recent = removeMatchFromPlayerRecent(player, matchId, "L");
+    if (!recent) return;
+
+    updates[`${ROOT_PATH}/players/${playerId}/records`] = recent.records;
+    updates[`${ROOT_PATH}/players/${playerId}/recordArchiveIds`] = recent.recordArchiveIds;
+  });
+
+  updates[`${ARCHIVE_MATCHES_PATH}/${matchId}`] = null;
+  if (match.month) {
+    updates[`${MONTHLY_MATCHES_PATH}/${match.month}/${matchId}`] = null;
+  }
+  updates[`${ROOT_PATH}/meta`] = createMeta();
+
+  try {
+    await update(ref(db), updates);
+    alert("archive 전적 삭제 완료!\nBKG.GG 집계에서도 제외되었습니다.");
+    closeModal();
+    await openArchiveManagerModal();
+  } catch (error) {
+    alertWriteError(error);
+  }
+}
+
+function openManualAdjustmentModal() {
+  if (!requireAdmin()) return;
+
+  const { month } = getLocalDateInfo();
+  const playerOptions = state.players
+    .map((player) => {
+      const label = `${player.name}${player.shortName ? " / " + player.shortName : ""} · ${player.tier} ${player.subTier}`;
+      return `<option value="${escapeAttr(player.id)}">${escapeHtml(label)}</option>`;
+    })
+    .join("");
+
+  openModal(
+    "BKG.GG 누적 보정",
+    `
+      <form class="form" id="manualAdjustmentForm">
+        <label>
+          멤버 선택
+          <select id="manualPlayerId">${playerOptions}</select>
+        </label>
+
+        <label>
+          보정 월
+          <input type="month" id="manualMonth" value="${escapeAttr(month)}" />
+        </label>
+
+        <label>
+          추가 승리 수
+          <input type="number" id="manualWins" min="0" step="1" value="0" />
+        </label>
+
+        <label>
+          추가 패배 수
+          <input type="number" id="manualLosses" min="0" step="1" value="0" />
+        </label>
+
+        <label>
+          메모
+          <input type="text" id="manualNote" placeholder="예: 초기화 전 기록 수동 보정" autocomplete="off" />
+        </label>
+
+        <div class="notice">
+          초기화되었거나 누락된 과거 전적을 BKG.GG 누적/월별 전적에 더하는 기능입니다.<br>
+          보정값은 최근 5전에는 포함하지 않습니다. 최근 5전은 실제 archive 경기 기록만 기준으로 표시됩니다.
+        </div>
+
+        <div class="form-actions">
+          <button type="submit" class="submit-btn">보정 추가</button>
+          <button type="button" class="cancel-btn" data-close>취소</button>
+        </div>
+      </form>
+    `
+  );
+
+  document.getElementById("manualAdjustmentForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    const playerId = document.getElementById("manualPlayerId").value;
+    const targetMonth = document.getElementById("manualMonth").value;
+    const wins = Math.floor(Number(document.getElementById("manualWins").value || 0));
+    const losses = Math.floor(Number(document.getElementById("manualLosses").value || 0));
+    const note = document.getElementById("manualNote").value.trim();
+
+    if (!playerId) {
+      alert("멤버를 선택해 주세요.");
+      return;
+    }
+
+    if (!targetMonth) {
+      alert("보정 월을 선택해 주세요.");
+      return;
+    }
+
+    if (!Number.isFinite(wins) || !Number.isFinite(losses) || wins < 0 || losses < 0) {
+      alert("승리/패배 수를 올바르게 입력해 주세요.");
+      return;
+    }
+
+    if (wins + losses <= 0) {
+      alert("추가할 승리 또는 패배 수가 1개 이상이어야 합니다.");
+      return;
+    }
+
+    await addManualAdjustment({ playerId, month: targetMonth, wins, losses, note });
+  });
+
+  bindCloseButtons();
+}
+
+async function addManualAdjustment({ playerId, month, wins, losses, note }) {
+  if (!requireAdmin()) return;
+
+  const player = state.players.find((item) => item.id === playerId);
+  if (!player) return;
+
+  const matches = wins + losses;
+
+  if (!confirm(`${player.name} 님에게 BKG.GG 누적 보정을 추가할까요?\n\n월: ${month}\n보정: ${matches}전 ${wins}승 ${losses}패\n\n이 값은 누적 전적과 월별 전적에는 포함되지만 최근 5전에는 포함되지 않습니다.`)) {
+    return;
+  }
+
+  const nowMs = Date.now();
+  const adjustmentRef = push(ref(db, `${MANUAL_ADJUSTMENTS_PATH}/${playerId}`));
+  const adjustmentId = adjustmentRef.key;
+
+  const updates = {};
+  updates[`${MANUAL_ADJUSTMENTS_PATH}/${playerId}/${adjustmentId}`] = {
+    month,
+    matches,
+    wins,
+    losses,
+    note,
+    playerName: player.name,
+    playerShortName: player.shortName || "",
+    createdAt: nowMs,
+    serverCreatedAt: serverTimestamp(),
+    createdBy: currentUser ? currentUser.uid : "",
+    createdByEmail: currentUser ? currentUser.email || "" : "",
+    source: "manualAdjustment"
+  };
+  updates[`${ROOT_PATH}/meta`] = createMeta();
+
+  try {
+    await update(ref(db), updates);
+    closeModal();
+    alert(`BKG.GG 누적 보정 완료!\n\n${player.name}: ${matches}전 ${wins}승 ${losses}패 추가`);
+  } catch (error) {
+    alertWriteError(error);
+  }
 }
 
 function openInitialArchiveSyncModal() {
