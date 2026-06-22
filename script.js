@@ -4,6 +4,7 @@ import {
   getDatabase,
   ref,
   onValue,
+  get,
   set,
   update,
   remove,
@@ -35,6 +36,8 @@ const ROOT_PATH = "bkgSoopRecordBoard";
 const ARCHIVE_MATCHES_PATH = `${ROOT_PATH}/archiveMatches`;
 const MEMBER_ARCHIVE_PATH = `${ROOT_PATH}/memberArchive`;
 const MONTHLY_MATCHES_PATH = `${ROOT_PATH}/monthlyMatches`;
+const MONTHLY_STATS_PATH = `${ROOT_PATH}/monthlyStats`;
+const INITIAL_IMPORT_PATH = `${ROOT_PATH}/archiveInitialImport`;
 
 const TIER_GROUPS = [
   { name: "0티어", subs: ["GOD", "상", "중", "하"] },
@@ -154,6 +157,7 @@ modal.addEventListener("click", (event) => {
 function setupExtraUi() {
   createSearchPanel();
   createTopWinRatePanel();
+  createArchiveAdminTools();
 }
 
 function createSearchPanel() {
@@ -231,6 +235,35 @@ function createTopWinRatePanel() {
 }
 
 
+function createArchiveAdminTools() {
+  const sideActions = document.querySelector(".admin-only.side-actions");
+  if (!sideActions || document.getElementById("initialArchiveSyncBtn")) return;
+
+  const initialBtn = document.createElement("button");
+  initialBtn.id = "initialArchiveSyncBtn";
+  initialBtn.className = "side-btn";
+  initialBtn.type = "button";
+  initialBtn.textContent = "BKG.GG 초기 연동";
+  initialBtn.addEventListener("click", () => {
+    if (!requireAdmin()) return;
+    openInitialArchiveSyncModal();
+  });
+
+  const cancelBulkBtn = document.createElement("button");
+  cancelBulkBtn.id = "cancelLastBulkArchiveBtn";
+  cancelBulkBtn.className = "side-btn danger";
+  cancelBulkBtn.type = "button";
+  cancelBulkBtn.textContent = "최근 일괄 전적 취소";
+  cancelBulkBtn.addEventListener("click", async () => {
+    if (!requireAdmin()) return;
+    await cancelLatestBulkArchiveMatch();
+  });
+
+  sideActions.appendChild(initialBtn);
+  sideActions.appendChild(cancelBulkBtn);
+}
+
+
 function convertFirebaseData(data) {
   const rawPlayers = data.players || {};
 
@@ -247,6 +280,10 @@ function convertFirebaseData(data) {
       tier,
       subTier,
       records: Array.isArray(player.records) ? player.records.slice(-30) : [],
+      recordArchiveIds: normalizeRecordArchiveIds(
+        Array.isArray(player.records) ? player.records.slice(-30) : [],
+        Array.isArray(player.recordArchiveIds) ? player.recordArchiveIds : []
+      ),
       createdAt: player.createdAt || 0
     };
   });
@@ -579,10 +616,13 @@ async function addRecord(playerId, result) {
   const player = state.players.find((p) => p.id === playerId);
   if (!player) return;
 
-  const records = [...player.records, result].slice(-30);
+  const recent = appendRecentRecord(player, result, "");
 
   try {
-    await update(ref(db, `${ROOT_PATH}/players/${playerId}`), { records });
+    await update(ref(db, `${ROOT_PATH}/players/${playerId}`), {
+      records: recent.records,
+      recordArchiveIds: recent.recordArchiveIds
+    });
     await updateMeta();
   } catch (error) {
     alertWriteError(error);
@@ -600,11 +640,23 @@ async function undoRecord(playerId) {
     return;
   }
 
+  const lastResult = player.records[player.records.length - 1];
+  const currentArchiveIds = normalizeRecordArchiveIds(player.records, player.recordArchiveIds);
+  const linkedMatchId = currentArchiveIds[currentArchiveIds.length - 1] || "";
   const records = player.records.slice(0, -1);
+  const recordArchiveIds = currentArchiveIds.slice(0, -1);
+  const updates = {
+    [`${ROOT_PATH}/players/${playerId}/records`]: records,
+    [`${ROOT_PATH}/players/${playerId}/recordArchiveIds`]: recordArchiveIds,
+    [`${ROOT_PATH}/meta`]: createMeta()
+  };
 
   try {
-    await update(ref(db, `${ROOT_PATH}/players/${playerId}`), { records });
-    await updateMeta();
+    if (linkedMatchId) {
+      await addArchiveRemovalUpdates(updates, player, linkedMatchId, lastResult);
+    }
+
+    await update(ref(db), updates);
   } catch (error) {
     alertWriteError(error);
   }
@@ -920,13 +972,15 @@ async function addBulkRecords(winnerNames, loserNames) {
   const updates = buildArchiveUpdates(matchId, winnerPlayers, loserPlayers);
 
   winnerPlayers.forEach((player) => {
-    const records = [...player.records, "W"].slice(-30);
-    updates[`${ROOT_PATH}/players/${player.id}/records`] = records;
+    const recent = appendRecentRecord(player, "W", matchId);
+    updates[`${ROOT_PATH}/players/${player.id}/records`] = recent.records;
+    updates[`${ROOT_PATH}/players/${player.id}/recordArchiveIds`] = recent.recordArchiveIds;
   });
 
   loserPlayers.forEach((player) => {
-    const records = [...player.records, "L"].slice(-30);
-    updates[`${ROOT_PATH}/players/${player.id}/records`] = records;
+    const recent = appendRecentRecord(player, "L", matchId);
+    updates[`${ROOT_PATH}/players/${player.id}/records`] = recent.records;
+    updates[`${ROOT_PATH}/players/${player.id}/recordArchiveIds`] = recent.recordArchiveIds;
   });
 
   updates[`${ROOT_PATH}/meta`] = createMeta();
@@ -942,6 +996,274 @@ async function addBulkRecords(winnerNames, loserNames) {
     alertWriteError(error);
   }
 }
+
+function normalizeRecordArchiveIds(records, recordArchiveIds = []) {
+  const safeRecords = Array.isArray(records) ? records.slice(-30) : [];
+  const safeIds = Array.isArray(recordArchiveIds) ? recordArchiveIds.slice(-30) : [];
+  const missingCount = Math.max(0, safeRecords.length - safeIds.length);
+  return [...Array(missingCount).fill(""), ...safeIds].slice(-30);
+}
+
+function appendRecentRecord(player, result, archiveMatchId = "") {
+  const records = Array.isArray(player.records) ? player.records.slice(-30) : [];
+  const archiveIds = normalizeRecordArchiveIds(records, player.recordArchiveIds);
+
+  return {
+    records: [...records, result].slice(-30),
+    recordArchiveIds: [...archiveIds, archiveMatchId || ""].slice(-30)
+  };
+}
+
+function removeMatchFromPlayerRecent(player, matchId, expectedResult) {
+  const records = Array.isArray(player.records) ? [...player.records] : [];
+  const archiveIds = normalizeRecordArchiveIds(records, player.recordArchiveIds);
+  let index = archiveIds.lastIndexOf(matchId);
+
+  if (index < 0 && records[records.length - 1] === expectedResult && !archiveIds[archiveIds.length - 1]) {
+    index = records.length - 1;
+  }
+
+  if (index < 0) return null;
+
+  records.splice(index, 1);
+  archiveIds.splice(index, 1);
+
+  return {
+    records: records.slice(-30),
+    recordArchiveIds: archiveIds.slice(-30)
+  };
+}
+
+async function addArchiveRemovalUpdates(updates, player, matchId, expectedResult) {
+  updates[`${MEMBER_ARCHIVE_PATH}/${player.id}/${matchId}`] = null;
+
+  if (String(matchId).startsWith("initial_")) return;
+
+  const matchSnapshot = await get(ref(db, `${ARCHIVE_MATCHES_PATH}/${matchId}`));
+  const match = matchSnapshot.val();
+  if (!match) return;
+
+  const originalWinnerIds = Array.isArray(match.winnerIds) ? match.winnerIds : [];
+  const originalLoserIds = Array.isArray(match.loserIds) ? match.loserIds : [];
+  const originalWinnerNames = Array.isArray(match.winnerNames) ? match.winnerNames : [];
+  const originalLoserNames = Array.isArray(match.loserNames) ? match.loserNames : [];
+
+  const winnerIds = originalWinnerIds.filter((id) => id !== player.id);
+  const loserIds = originalLoserIds.filter((id) => id !== player.id);
+  const winnerNames = originalWinnerNames.filter((_, index) => originalWinnerIds[index] !== player.id);
+  const loserNames = originalLoserNames.filter((_, index) => originalLoserIds[index] !== player.id);
+
+  if (winnerIds.length === 0 && loserIds.length === 0) {
+    updates[`${ARCHIVE_MATCHES_PATH}/${matchId}`] = null;
+    if (match.month) {
+      updates[`${MONTHLY_MATCHES_PATH}/${match.month}/${matchId}`] = null;
+    }
+    return;
+  }
+
+  updates[`${ARCHIVE_MATCHES_PATH}/${matchId}/winnerIds`] = winnerIds;
+  updates[`${ARCHIVE_MATCHES_PATH}/${matchId}/loserIds`] = loserIds;
+  updates[`${ARCHIVE_MATCHES_PATH}/${matchId}/winnerNames`] = winnerNames;
+  updates[`${ARCHIVE_MATCHES_PATH}/${matchId}/loserNames`] = loserNames;
+}
+
+function openInitialArchiveSyncModal() {
+  const { month } = getLocalDateInfo();
+  const maxRecords = Math.max(0, ...state.players.map((player) => player.records.length));
+
+  openModal(
+    "BKG.GG 초기 연동",
+    `
+      <form class="form" id="initialArchiveSyncForm">
+        <label>
+          연동 월
+          <input type="month" id="initialArchiveMonth" value="${escapeAttr(month)}" />
+        </label>
+
+        <label>
+          해당 월 전체 진행 판 수
+          <input type="number" id="initialArchiveTotalMatches" min="0" step="1" value="${maxRecords}" />
+        </label>
+
+        <div class="notice">
+          현재 전적표에 남아 있는 최근 전적을 BKG.GG 누적 데이터로 1회 복사합니다.<br>
+          기존 전적에는 경기별 묶음/날짜 정보가 없어서, 개인별 승패 기록은 그대로 복사하고 참여율의 분모는 위에 입력한 전체 진행 판 수를 사용합니다.<br>
+          중복 방지를 위해 같은 월은 한 번만 초기 연동할 수 있습니다.
+        </div>
+
+        <div class="form-actions">
+          <button type="submit" class="submit-btn">초기 연동 실행</button>
+          <button type="button" class="cancel-btn" data-close>취소</button>
+        </div>
+      </form>
+    `
+  );
+
+  document.getElementById("initialArchiveSyncForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    const targetMonth = document.getElementById("initialArchiveMonth").value;
+    const totalMatches = Number(document.getElementById("initialArchiveTotalMatches").value || 0);
+
+    if (!targetMonth) {
+      alert("연동 월을 선택해 주세요.");
+      return;
+    }
+
+    if (!Number.isFinite(totalMatches) || totalMatches < 0) {
+      alert("전체 진행 판 수를 올바르게 입력해 주세요.");
+      return;
+    }
+
+    await importCurrentRecordsToArchive(targetMonth, Math.floor(totalMatches));
+  });
+
+  bindCloseButtons();
+}
+
+async function importCurrentRecordsToArchive(targetMonth, totalMatches) {
+  if (!requireAdmin()) return;
+
+  const importSnapshot = await get(ref(db, `${INITIAL_IMPORT_PATH}/${targetMonth}`));
+  if (importSnapshot.exists()) {
+    alert(`${targetMonth} 월은 이미 초기 연동된 기록이 있습니다.\n중복 연동을 막기 위해 작업을 중단합니다.`);
+    return;
+  }
+
+  const recordCount = state.players.reduce((sum, player) => sum + player.records.length, 0);
+
+  if (recordCount === 0) {
+    alert("초기 연동할 전적이 없습니다.");
+    return;
+  }
+
+  if (!confirm(`현재 전적표에 남아 있는 승패 ${recordCount}개를 BKG.GG archive로 복사할까요?\n\n연동 월: ${targetMonth}\n전체 진행 판 수: ${totalMatches}판`)) {
+    return;
+  }
+
+  const nowMs = Date.now();
+  const updates = {};
+  let importedRecords = 0;
+
+  state.players.forEach((player) => {
+    const records = Array.isArray(player.records) ? player.records.slice(-30) : [];
+    const currentArchiveIds = normalizeRecordArchiveIds(records, player.recordArchiveIds);
+    const nextArchiveIds = [...currentArchiveIds];
+
+    records.forEach((result, index) => {
+      if (currentArchiveIds[index]) return;
+
+      const matchId = `initial_${targetMonth.replace("-", "")}_${player.id}_${String(index + 1).padStart(2, "0")}`;
+      const createdAt = nowMs - (records.length - index) * 1000;
+
+      updates[`${MEMBER_ARCHIVE_PATH}/${player.id}/${matchId}`] = {
+        date: `${targetMonth}-01`,
+        month: targetMonth,
+        result,
+        createdAt,
+        matchId,
+        source: "initialImport"
+      };
+
+      nextArchiveIds[index] = matchId;
+      importedRecords += 1;
+    });
+
+    updates[`${ROOT_PATH}/players/${player.id}/recordArchiveIds`] = nextArchiveIds.slice(-30);
+  });
+
+  updates[`${INITIAL_IMPORT_PATH}/${targetMonth}`] = {
+    completed: true,
+    importedAt: nowMs,
+    serverImportedAt: serverTimestamp(),
+    importedBy: currentUser ? currentUser.uid : "",
+    importedByEmail: currentUser ? currentUser.email || "" : "",
+    totalMatches,
+    recordCount,
+    importedRecords
+  };
+
+  updates[`${MONTHLY_STATS_PATH}/${targetMonth}/initialTotalMatches`] = totalMatches;
+  updates[`${MONTHLY_STATS_PATH}/${targetMonth}/initialRecordCount`] = recordCount;
+  updates[`${MONTHLY_STATS_PATH}/${targetMonth}/updatedAt`] = nowMs;
+  updates[`${ROOT_PATH}/meta`] = createMeta();
+
+  try {
+    await update(ref(db), updates);
+    closeModal();
+    alert(`BKG.GG 초기 연동 완료!\n\n복사된 개인 승패: ${importedRecords}개\n참여율 기준 전체 판 수: ${totalMatches}판`);
+  } catch (error) {
+    alertWriteError(error);
+  }
+}
+
+async function cancelLatestBulkArchiveMatch() {
+  if (!requireAdmin()) return;
+
+  const snapshot = await get(ref(db, ARCHIVE_MATCHES_PATH));
+  const rawMatches = snapshot.val() || {};
+  const matches = Object.entries(rawMatches)
+    .map(([matchId, match]) => ({ matchId, ...match }))
+    .filter((match) => match.source === "bulkRecord")
+    .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+
+  if (matches.length === 0) {
+    alert("취소할 일괄 archive 전적이 없습니다.");
+    return;
+  }
+
+  const target = matches[0];
+  const winnerIds = Array.isArray(target.winnerIds) ? target.winnerIds : [];
+  const loserIds = Array.isArray(target.loserIds) ? target.loserIds : [];
+  const winnerNames = Array.isArray(target.winnerNames) ? target.winnerNames : [];
+  const loserNames = Array.isArray(target.loserNames) ? target.loserNames : [];
+
+  if (!confirm(`가장 최근 일괄 전적을 취소할까요?\n\n날짜: ${target.date || "-"}\n승리: ${winnerNames.join(", ") || winnerIds.length + "명"}\n패배: ${loserNames.join(", ") || loserIds.length + "명"}\n\nBKG.GG archive와 연결된 최근 30전 기록을 함께 정리합니다.`)) {
+    return;
+  }
+
+  const updates = {};
+
+  winnerIds.forEach((playerId) => {
+    updates[`${MEMBER_ARCHIVE_PATH}/${playerId}/${target.matchId}`] = null;
+
+    const player = state.players.find((item) => item.id === playerId);
+    if (!player) return;
+
+    const recent = removeMatchFromPlayerRecent(player, target.matchId, "W");
+    if (!recent) return;
+
+    updates[`${ROOT_PATH}/players/${playerId}/records`] = recent.records;
+    updates[`${ROOT_PATH}/players/${playerId}/recordArchiveIds`] = recent.recordArchiveIds;
+  });
+
+  loserIds.forEach((playerId) => {
+    updates[`${MEMBER_ARCHIVE_PATH}/${playerId}/${target.matchId}`] = null;
+
+    const player = state.players.find((item) => item.id === playerId);
+    if (!player) return;
+
+    const recent = removeMatchFromPlayerRecent(player, target.matchId, "L");
+    if (!recent) return;
+
+    updates[`${ROOT_PATH}/players/${playerId}/records`] = recent.records;
+    updates[`${ROOT_PATH}/players/${playerId}/recordArchiveIds`] = recent.recordArchiveIds;
+  });
+
+  updates[`${ARCHIVE_MATCHES_PATH}/${target.matchId}`] = null;
+  if (target.month) {
+    updates[`${MONTHLY_MATCHES_PATH}/${target.month}/${target.matchId}`] = null;
+  }
+  updates[`${ROOT_PATH}/meta`] = createMeta();
+
+  try {
+    await update(ref(db), updates);
+    alert("최근 일괄 전적 취소 완료!\nBKG.GG archive에서도 함께 제거되었습니다.");
+  } catch (error) {
+    alertWriteError(error);
+  }
+}
+
 
 function findPlayerByInputName(inputName) {
   const target = normalizeName(inputName);
