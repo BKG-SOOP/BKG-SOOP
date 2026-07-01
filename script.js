@@ -6,7 +6,9 @@ import {
   onValue,
   set,
   update,
-  remove
+  remove,
+  push,
+  serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js";
 
 import {
@@ -30,6 +32,9 @@ const firebaseConfig = {
 const ADMIN_UID = "7rYEhRouIuZdEK3bRoQtYUz7arW2";
 const ADMIN_EMAIL_DOMAIN = "bkg-soop.com";
 const ROOT_PATH = "bkgSoopRecordBoard";
+const ARCHIVE_MATCHES_PATH = `${ROOT_PATH}/archiveMatches`;
+const MEMBER_ARCHIVE_PATH = `${ROOT_PATH}/memberArchive`;
+const MONTHLY_MATCHES_PATH = `${ROOT_PATH}/monthlyMatches`;
 
 const TIER_GROUPS = [
   { name: "0티어", subs: ["GOD", "상", "중", "하", "최하"] },
@@ -148,7 +153,7 @@ resetAllBtn.addEventListener("click", async () => {
 
   if (
     !confirm(
-      "전체 전적을 초기화할까요?\n\n멤버는 유지되고 모든 멤버의 승/패 기록만 삭제됩니다."
+      "전체 전적을 초기화할까요?\n\n멤버는 유지되고 모든 멤버의 최근 30전 승/패 기록만 삭제됩니다.\nBKG.GG 누적 archive 전적은 삭제하지 않습니다."
     )
   ) {
     return;
@@ -160,9 +165,10 @@ resetAllBtn.addEventListener("click", async () => {
     updates[`${ROOT_PATH}/players/${player.id}/records`] = [];
   });
 
+  updates[`${ROOT_PATH}/meta`] = createMeta();
+
   try {
     await update(ref(db), updates);
-    await updateMeta();
   } catch (error) {
     alertWriteError(error);
   }
@@ -809,6 +815,65 @@ function parseBulkNames(text) {
     .filter(Boolean);
 }
 
+
+function getLocalDateInfo(date = new Date()) {
+  const year = date.getFullYear();
+  const monthNumber = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = `${year}-${monthNumber}`;
+  const dateText = `${month}-${day}`;
+
+  return { date: dateText, month };
+}
+
+function buildArchiveUpdates(matchId, winnerPlayers, loserPlayers) {
+  const nowMs = Date.now();
+  const { date, month } = getLocalDateInfo(new Date(nowMs));
+  const winnerIds = winnerPlayers.map((player) => player.id);
+  const loserIds = loserPlayers.map((player) => player.id);
+  const updates = {};
+
+  updates[`${ARCHIVE_MATCHES_PATH}/${matchId}`] = {
+    date,
+    month,
+    winnerIds,
+    loserIds,
+    winnerNames: winnerPlayers.map((player) => player.name),
+    loserNames: loserPlayers.map((player) => player.name),
+    createdAt: nowMs,
+    serverCreatedAt: serverTimestamp(),
+    createdBy: currentUser ? currentUser.uid : "",
+    createdByEmail: currentUser ? currentUser.email || "" : "",
+    source: "bulkRecord"
+  };
+
+  winnerPlayers.forEach((player) => {
+    updates[`${MEMBER_ARCHIVE_PATH}/${player.id}/${matchId}`] = {
+      date,
+      month,
+      result: "W",
+      createdAt: nowMs,
+      matchId,
+      source: "bulkRecord"
+    };
+  });
+
+  loserPlayers.forEach((player) => {
+    updates[`${MEMBER_ARCHIVE_PATH}/${player.id}/${matchId}`] = {
+      date,
+      month,
+      result: "L",
+      createdAt: nowMs,
+      matchId,
+      source: "bulkRecord"
+    };
+  });
+
+  updates[`${MONTHLY_MATCHES_PATH}/${month}/${matchId}`] = true;
+
+  return updates;
+}
+
 async function addBulkRecords(winnerNames, loserNames) {
   if (!requireAdmin()) return;
 
@@ -879,7 +944,9 @@ async function addBulkRecords(winnerNames, loserNames) {
     return;
   }
 
-  const updates = {};
+  const matchRef = push(ref(db, ARCHIVE_MATCHES_PATH));
+  const matchId = matchRef.key;
+  const updates = buildArchiveUpdates(matchId, winnerPlayers, loserPlayers);
 
   winnerPlayers.forEach((player) => {
     const records = [...player.records, "W"].slice(-30);
