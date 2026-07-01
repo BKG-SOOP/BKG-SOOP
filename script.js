@@ -44,6 +44,34 @@ const TIER_GROUPS = [
   { name: "3티어", subs: ["최상", "상", "중", "하"] }
 ];
 
+const TIER_SCORE_MAP = {
+  "0티어": {
+    GOD: 160,
+    상: 145,
+    중: 130,
+    하: 120,
+    최하: 110
+  },
+  "1티어": {
+    최상: 100,
+    상: 90,
+    중: 80,
+    하: 70
+  },
+  "2티어": {
+    최상: 60,
+    상: 50,
+    중: 40,
+    하: 30
+  },
+  "3티어": {
+    최상: 20,
+    상: 15,
+    중: 10,
+    하: 5
+  }
+};
+
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 const auth = getAuth(app);
@@ -424,7 +452,7 @@ function renderTierNav() {
 
     const subLinks = group.subs
       .map((sub, subIndex) => {
-        return `<a href="#${getSubTierId(groupIndex, subIndex)}">${sub}</a>`;
+        return `<a href="#${getSubTierId(groupIndex, subIndex)}">${getTierScoreLabel(group.name, sub)}</a>`;
       })
       .join("");
 
@@ -437,6 +465,11 @@ function renderTierNav() {
 
     tierNav.appendChild(wrapper);
   });
+}
+
+function getTierScoreLabel(tierName, subTierName) {
+  const score = TIER_SCORE_MAP[tierName]?.[subTierName];
+  return typeof score === "number" ? `${subTierName} (${score})` : subTierName;
 }
 
 function getVisiblePlayers() {
