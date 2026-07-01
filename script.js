@@ -4,6 +4,7 @@ import {
   getDatabase,
   ref,
   onValue,
+  get,
   set,
   update,
   remove,
@@ -66,6 +67,7 @@ const connectStatusEl = document.getElementById("connectStatus");
 
 const loginBtn = document.getElementById("loginBtn");
 const addRecordBtn = document.getElementById("addRecordBtn");
+const deleteRecordsBtn = document.getElementById("deleteRecordsBtn");
 const addPlayerBtn = document.getElementById("addPlayerBtn");
 const resetAllBtn = document.getElementById("resetAllBtn");
 
@@ -128,6 +130,13 @@ addRecordBtn.addEventListener("click", () => {
   if (!requireAdmin()) return;
   openAddRecordModal();
 });
+
+if (deleteRecordsBtn) {
+  deleteRecordsBtn.addEventListener("click", () => {
+    if (!requireAdmin()) return;
+    openDeleteRecordsModal();
+  });
+}
 
 addPlayerBtn.addEventListener("click", () => {
   if (!requireAdmin()) return;
@@ -806,6 +815,338 @@ function openAddRecordModal() {
   });
 
   bindCloseButtons();
+}
+
+
+async function openDeleteRecordsModal() {
+  if (!requireAdmin()) return;
+
+  openModal(
+    "전적 선택 삭제",
+    `
+      <div class="record-delete-loading">전적 목록을 불러오는 중입니다...</div>
+    `,
+    "wide-modal record-delete-modal"
+  );
+
+  try {
+    const matches = await loadArchiveMatches();
+
+    if (matches.length === 0) {
+      modalBody.innerHTML = `
+        <div class="record-delete-empty">
+          삭제할 수 있는 archive 전적이 없습니다.<br>
+          전적 일괄 추가로 저장된 전적만 이 목록에 표시됩니다.
+        </div>
+        <div class="form-actions">
+          <button type="button" class="cancel-btn" data-close>닫기</button>
+        </div>
+      `;
+      bindCloseButtons();
+      return;
+    }
+
+    const matchesById = new Map(matches.map((match) => [match.id, match]));
+
+    modalBody.innerHTML = `
+      <form class="form record-delete-form" id="deleteRecordsForm">
+        <div class="record-delete-guide">
+          삭제할 전적을 체크한 뒤 <b>선택 전적 삭제</b>를 누르면 BKG.GG 연동 archive와 월별 참여율 데이터에서 같이 삭제됩니다.
+        </div>
+
+        <div class="record-delete-tools">
+          <input
+            type="text"
+            id="recordDeleteSearch"
+            class="record-delete-search"
+            placeholder="날짜, 승리/패배 닉네임 검색"
+            autocomplete="off"
+          />
+          <button type="button" id="recordDeleteSelectVisible" class="mini-btn">현재 목록 선택</button>
+          <button type="button" id="recordDeleteClear" class="mini-btn">선택 해제</button>
+          <span id="recordDeleteCount" class="record-delete-count">0개 선택</span>
+        </div>
+
+        <div id="recordDeleteList" class="record-delete-list"></div>
+
+        <div class="form-actions record-delete-actions">
+          <button type="submit" class="submit-btn danger-submit">선택 전적 삭제</button>
+          <button type="button" class="cancel-btn" data-close>취소</button>
+        </div>
+      </form>
+    `;
+
+    const searchInput = document.getElementById("recordDeleteSearch");
+    const listEl = document.getElementById("recordDeleteList");
+    const countEl = document.getElementById("recordDeleteCount");
+    const selectVisibleBtn = document.getElementById("recordDeleteSelectVisible");
+    const clearBtn = document.getElementById("recordDeleteClear");
+
+    const renderDeleteList = () => {
+      const query = normalizeName(searchInput.value);
+      const filteredMatches = matches.filter((match) => {
+        if (!query) return true;
+        return normalizeName(getArchiveMatchSearchText(match)).includes(query);
+      });
+
+      if (filteredMatches.length === 0) {
+        listEl.innerHTML = `<div class="record-delete-empty small">검색 결과가 없습니다.</div>`;
+        updateDeleteSelectionCount(countEl);
+        return;
+      }
+
+      listEl.innerHTML = filteredMatches
+        .map((match) => createArchiveMatchDeleteRow(match))
+        .join("");
+
+      listEl.querySelectorAll('input[name="deleteMatchIds"]').forEach((checkbox) => {
+        checkbox.addEventListener("change", () => updateDeleteSelectionCount(countEl));
+      });
+
+      updateDeleteSelectionCount(countEl);
+    };
+
+    searchInput.addEventListener("input", renderDeleteList);
+
+    selectVisibleBtn.addEventListener("click", () => {
+      listEl.querySelectorAll('input[name="deleteMatchIds"]').forEach((checkbox) => {
+        checkbox.checked = true;
+      });
+      updateDeleteSelectionCount(countEl);
+    });
+
+    clearBtn.addEventListener("click", () => {
+      document.querySelectorAll('input[name="deleteMatchIds"]').forEach((checkbox) => {
+        checkbox.checked = false;
+      });
+      updateDeleteSelectionCount(countEl);
+    });
+
+    document.getElementById("deleteRecordsForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+
+      const selectedIds = Array.from(
+        document.querySelectorAll('input[name="deleteMatchIds"]:checked')
+      ).map((checkbox) => checkbox.value);
+
+      if (selectedIds.length === 0) {
+        alert("삭제할 전적을 선택해 주세요.");
+        return;
+      }
+
+      const previewLines = selectedIds
+        .slice(0, 5)
+        .map((matchId) => formatArchiveMatchSummary(matchesById.get(matchId)))
+        .join("\n");
+
+      const moreText = selectedIds.length > 5 ? `\n...외 ${selectedIds.length - 5}개` : "";
+
+      if (
+        !confirm(
+          `선택한 전적 ${selectedIds.length}개를 삭제할까요?\n\n` +
+          `${previewLines}${moreText}\n\n` +
+          "삭제하면 BKG.GG의 월별 전적/참여율/최근 5전에서도 같이 빠집니다."
+        )
+      ) {
+        return;
+      }
+
+      try {
+        await deleteSelectedArchiveMatches(selectedIds, matchesById);
+        closeModal();
+        alert(`선택한 전적 ${selectedIds.length}개를 삭제했습니다.`);
+      } catch (error) {
+        alertWriteError(error);
+      }
+    });
+
+    renderDeleteList();
+    bindCloseButtons();
+  } catch (error) {
+    modalBody.innerHTML = `
+      <div class="error-text" style="padding: 22px;">
+        전적 목록을 불러오지 못했습니다.<br>${escapeHtml(error.message)}
+      </div>
+      <div class="form-actions">
+        <button type="button" class="cancel-btn" data-close>닫기</button>
+      </div>
+    `;
+    bindCloseButtons();
+  }
+}
+
+async function loadArchiveMatches() {
+  const snapshot = await get(ref(db, ARCHIVE_MATCHES_PATH));
+  const rawMatches = snapshot.val() || {};
+
+  return Object.entries(rawMatches)
+    .map(([id, match]) => normalizeArchiveMatch(id, match || {}))
+    .sort((a, b) => {
+      if (b.createdAt !== a.createdAt) return b.createdAt - a.createdAt;
+      return b.id.localeCompare(a.id);
+    });
+}
+
+function normalizeArchiveMatch(id, match) {
+  const winnerIds = Array.isArray(match.winnerIds) ? match.winnerIds.filter(Boolean) : [];
+  const loserIds = Array.isArray(match.loserIds) ? match.loserIds.filter(Boolean) : [];
+  const date = match.date || formatDateFromCreatedAt(match.createdAt) || "날짜 없음";
+  const month = match.month || deriveMonthFromDate(date);
+
+  return {
+    id,
+    date,
+    month,
+    createdAt: Number(match.createdAt) || 0,
+    winnerIds,
+    loserIds,
+    winnerNames: normalizeArchiveNameList(match.winnerNames, winnerIds),
+    loserNames: normalizeArchiveNameList(match.loserNames, loserIds)
+  };
+}
+
+function normalizeArchiveNameList(names, ids) {
+  if (Array.isArray(names) && names.length > 0) {
+    return names.map((name) => String(name || "이름없음"));
+  }
+
+  return ids.map((id) => getPlayerLabelById(id));
+}
+
+function getPlayerLabelById(playerId) {
+  const player = state.players.find((p) => p.id === playerId);
+  if (!player) return playerId;
+  return player.shortName ? `${player.shortName} / ${player.name}` : player.name;
+}
+
+function createArchiveMatchDeleteRow(match) {
+  const winnerText = match.winnerNames.length > 0 ? match.winnerNames.join(", ") : "-";
+  const loserText = match.loserNames.length > 0 ? match.loserNames.join(", ") : "-";
+  const totalPlayers = match.winnerIds.length + match.loserIds.length;
+
+  return `
+    <label class="record-delete-row">
+      <input type="checkbox" name="deleteMatchIds" value="${escapeAttr(match.id)}" />
+      <div class="record-delete-main">
+        <div class="record-delete-title">
+          <span class="record-delete-date">${escapeHtml(match.date)}</span>
+          <span class="record-delete-total">${totalPlayers}명</span>
+        </div>
+        <div class="record-delete-teams">
+          <div><b class="win-text">승</b> ${escapeHtml(winnerText)}</div>
+          <div><b class="loss-text">패</b> ${escapeHtml(loserText)}</div>
+        </div>
+      </div>
+    </label>
+  `;
+}
+
+function updateDeleteSelectionCount(countEl) {
+  const selectedCount = document.querySelectorAll('input[name="deleteMatchIds"]:checked').length;
+  countEl.textContent = `${selectedCount}개 선택`;
+}
+
+function getArchiveMatchSearchText(match) {
+  return [
+    match.date,
+    match.month,
+    ...match.winnerNames,
+    ...match.loserNames
+  ].join(" ");
+}
+
+function formatArchiveMatchSummary(match) {
+  if (!match) return "알 수 없는 전적";
+
+  const winnerText = match.winnerNames.slice(0, 4).join(", ") || "-";
+  const loserText = match.loserNames.slice(0, 4).join(", ") || "-";
+
+  return `${match.date} / 승: ${winnerText} / 패: ${loserText}`;
+}
+
+async function deleteSelectedArchiveMatches(selectedIds, matchesById) {
+  const selectedSet = new Set(selectedIds);
+  const affectedPlayerIds = new Set();
+  const updates = {};
+
+  selectedIds.forEach((matchId) => {
+    const match = matchesById.get(matchId);
+    if (!match) return;
+
+    updates[`${ARCHIVE_MATCHES_PATH}/${matchId}`] = null;
+
+    if (match.month) {
+      updates[`${MONTHLY_MATCHES_PATH}/${match.month}/${matchId}`] = null;
+    }
+
+    match.winnerIds.forEach((playerId) => {
+      affectedPlayerIds.add(playerId);
+      updates[`${MEMBER_ARCHIVE_PATH}/${playerId}/${matchId}`] = null;
+    });
+
+    match.loserIds.forEach((playerId) => {
+      affectedPlayerIds.add(playerId);
+      updates[`${MEMBER_ARCHIVE_PATH}/${playerId}/${matchId}`] = null;
+    });
+  });
+
+  await rebuildRecentRecordsForPlayers(Array.from(affectedPlayerIds), selectedSet, updates);
+
+  updates[`${ROOT_PATH}/meta`] = createMeta();
+
+  await update(ref(db), updates);
+}
+
+async function rebuildRecentRecordsForPlayers(playerIds, deletedMatchIds, updates) {
+  await Promise.all(
+    playerIds.map(async (playerId) => {
+      const snapshot = await get(ref(db, `${MEMBER_ARCHIVE_PATH}/${playerId}`));
+      const rawArchive = snapshot.val() || {};
+
+      const records = Object.entries(rawArchive)
+        .filter(([matchId, archiveRecord]) => {
+          return (
+            !deletedMatchIds.has(matchId) &&
+            archiveRecord &&
+            (archiveRecord.result === "W" || archiveRecord.result === "L")
+          );
+        })
+        .sort((a, b) => compareArchiveRecords(a, b))
+        .slice(-30)
+        .map(([, archiveRecord]) => archiveRecord.result);
+
+      updates[`${ROOT_PATH}/players/${playerId}/records`] = records;
+    })
+  );
+}
+
+function compareArchiveRecords(a, b) {
+  const [aId, aRecord] = a;
+  const [bId, bRecord] = b;
+  const aTime = getArchiveRecordTime(aRecord);
+  const bTime = getArchiveRecordTime(bRecord);
+
+  if (aTime !== bTime) return aTime - bTime;
+  return aId.localeCompare(bId);
+}
+
+function getArchiveRecordTime(record) {
+  if (!record) return 0;
+  if (Number(record.createdAt)) return Number(record.createdAt);
+
+  const parsed = Date.parse(record.date || "");
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function formatDateFromCreatedAt(createdAt) {
+  const time = Number(createdAt);
+  if (!time) return "";
+  return getLocalDateInfo(new Date(time)).date;
+}
+
+function deriveMonthFromDate(dateText) {
+  const match = String(dateText || "").match(/^(\d{4}-\d{2})/);
+  return match ? match[1] : "";
 }
 
 function parseBulkNames(text) {
